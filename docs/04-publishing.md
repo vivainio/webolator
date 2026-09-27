@@ -27,8 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history, for per-page "last updated" dates
       - uses: astral-sh/setup-uv@v6
-      - run: uvx webolator docs -o _site
+      - run: uvx webolator docs -o _site --check
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
@@ -44,4 +46,4 @@ jobs:
         uses: actions/deploy-pages@v4
 ```
 
-webolator's own workflow builds webolator from source instead of running `uvx`, so the docs always match the current code.
+`--check` fails the deployment if a link is broken, so a bad link never reaches the published site. webolator's own workflow builds webolator from source instead of running `uvx`, so the docs always match the current code.

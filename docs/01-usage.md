@@ -17,6 +17,8 @@ Options:
       --css <CSS>                Extra stylesheet applied after the built-in styles (in addition to <root>/webolator.css)
       --exclude <GLOB>           Leave out files matching this gitignore-style pattern (repeatable)
       --no-ignore                Include files that .gitignore / .ignore would leave out (.webolatorignore still applies)
+      --no-git                   Don't add "last updated" dates and "edit this page" links from git
+      --check                    Fail (exit code 1) if there are broken or excluded links
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -72,6 +74,16 @@ When the input is a single file, the site contains only that file and what it li
 ## Ordering
 
 The sidebar is sorted by name, with files before folders. To choose the order, give files and folders a number prefix such as `01-usage.md` or `02-guides/`. Numbered items come first, in numeric order. The prefix doesn't appear in labels, and it's removed from output paths too, so `02-guides/01-setup.md` becomes `guides/setup.html`. Links in your markdown still use the real file names.
+
+A page can also set its position with `order:` in [front matter](03-features/05-writing.md#front-matter), which takes precedence over the prefix. The same order is used for the previous and next links at the bottom of each page.
+
+## Checking links in CI
+
+```bash
+webolator docs/ --check
+```
+
+`--check` builds as usual, but exits with code 1 if there were any broken links, links to excluded files or unknown `[[wikilinks]]`. Use it to keep docs from rotting.
 
 The site title is the first heading of the root `README.md` or `index.md`. If there is neither, the folder name is used.
 

@@ -12,8 +12,11 @@ You write links the same way you would for GitHub, and webolator rewrites them t
 | `[x](report.html)`, `[x](build.log)` | copied and linked as is | shown inside the page |
 | `[x](spec.pdf)` | copied and linked as is | opened from embedded data |
 | `https://…`, `mailto:…` | unchanged | unchanged |
+| `[[Page name]]` | the matching page | the matching section |
 
 Links written as raw HTML inside markdown, such as `<img src="…">` and `<a href="…">`, are rewritten too.
+
+See [Wikilinks](03-features/05-writing.md#wikilinks) for how `[[…]]` names are matched.
 
 ## Heading anchors
 
@@ -26,6 +29,8 @@ A link to a file that doesn't exist is left alone and reported during the build:
 ```text
 warning: README.md: broken link: nope.md
 ```
+
+Add `--check` to make these warnings fail the build.
 
 ## Folders that work from disk
 

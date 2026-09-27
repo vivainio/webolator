@@ -28,21 +28,29 @@ All colors are CSS variables. Overriding them is usually all a theme needs:
 | `--side`, `--hover`, `--active` | sidebar background, hover and current page |
 | `--note`, `--tip`, `--important`, `--warning`, `--caution` | `> [!NOTE]`-style alerts |
 
-The built-in dark theme sets these variables inside `@media (prefers-color-scheme: dark)`. A plain `:root` rule of yours overrides both themes. To change only one, wrap your rule in the same media query.
+A plain `:root` rule of yours overrides both themes. To change only the dark theme, target both ways it can be active: chosen by the OS setting, or by the theme toggle (which sets `data-theme` on `<html>`):
+
+```css
+@media (prefers-color-scheme: dark) { :root:not([data-theme=light]) { --link: #ff79c6; } }
+:root[data-theme=dark] { --link: #ff79c6; }
+```
 
 ## Page structure
 
 ```html
 <body>
   <nav class="side">                      <!-- sidebar; missing when there's only one page -->
-    <a data-site href="…">Site title</a>
+    <div class="nav-head"><a data-site href="…">Site title</a> <button class="menu-toggle"> <button class="theme-toggle"></div>
     <ul>
       <li><a href="…" class="active">Page</a></li>
       <li><details open><summary><a href="…">folder</a></summary><ul>…</ul></details></li>
     </ul>
   </nav>
   <main>
-    <article> … your markdown … </article>
+    <div class="page-wrap">
+      <article> … your markdown … <p class="page-meta">…</p> <nav class="pager">…</nav> </article>
+      <aside class="toc">…</aside>              <!-- only with 2+ headings -->
+    </div>
   </main>
 </body>
 ```
@@ -58,6 +66,13 @@ Inside `article` you get plain HTML (`h1`–`h6`, `p`, `table`, `blockquote`, `p
 | `.anchor` | the `#` link shown when you hover over a heading |
 | `.tag` | the small file-type label next to non-markdown files in the sidebar |
 | `ul.listing` | the file list on a generated folder page |
+| `.page-wrap` | the article plus its table of contents |
+| `aside.toc`, `.toc-h2`, `.toc-h3` | the "On this page" sidebar |
+| `.page-meta` | the "Last updated · Edit this page" line |
+| `nav.pager`, `.prev`, `.next` | previous / next links |
+| `.code-wrap`, `button.copy` | code block wrapper and its copy button |
+| `.theme-toggle`, `.menu-toggle` | the light/dark button and the phone menu button |
+| `.math-inline`, `.math-display` | rendered math |
 | `section.page` | one page, in `--single` output only |
 
 ## Examples

@@ -33,7 +33,7 @@
     for (const a of document.querySelectorAll('nav.side a')) {
       a.classList.toggle('active', a.getAttribute('href') === '#' + section.id);
     }
-    if (window.webolatorMermaid) window.webolatorMermaid(section);
+    if (window.mermaid) webolatorMermaidRun(section);
     if (target !== section) target.scrollIntoView();
     else window.scrollTo(0, 0);
   }

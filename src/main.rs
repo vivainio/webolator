@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 const MERMAID_CDN: &str = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
 const STYLE: &str = include_str!("style.css");
 const SINGLE_JS: &str = include_str!("single.js");
+const COMMON_JS: &str = include_str!("common.js");
 
 const TEXT_EXT: &[&str] = &[
     "txt",
@@ -96,6 +97,19 @@ struct Cli {
     /// Include files that .gitignore / .ignore would leave out (.webolatorignore still applies)
     #[arg(long)]
     no_ignore: bool,
+    /// Don't add "last updated" dates and "edit this page" links from git
+    #[arg(long)]
+    no_git: bool,
+    /// Fail (exit code 1) if there are broken or excluded links
+    #[arg(long)]
+    check: bool,
+}
+
+static WARNINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn print_warning(label: &str, w: &str) {
+    WARNINGS.fetch_add(1, Ordering::SeqCst);
+    eprintln!("warning: {label}: {w}");
 }
 
 // ---------------------------------------------------------------- site model
@@ -111,6 +125,10 @@ enum Kind {
 struct Entry {
     kind: Kind,
     title: String,
+    /// Sort position from front matter `order:`; overrides a "01-" filename prefix.
+    order: Option<i64>,
+    /// Front matter `hidden: true`: built and linkable, but not in the sidebar or prev/next.
+    hidden: bool,
 }
 
 enum DirIndex {
@@ -127,6 +145,14 @@ struct Site {
     dirs: BTreeMap<String, DirIndex>,
     /// Static output path of each entry.
     out: HashMap<String, String>,
+    git: Option<GitInfo>,
+}
+
+/// A page in reading order (sidebar order, depth first).
+#[derive(Clone, PartialEq)]
+enum Doc {
+    Entry(String),
+    Listing(String),
 }
 
 fn ext_of(key: &str) -> String {
@@ -182,7 +208,7 @@ impl Site {
     fn nav_keys(&self) -> impl Iterator<Item = &String> {
         self.entries
             .iter()
-            .filter(|(k, e)| in_nav(k, e.kind))
+            .filter(|(k, e)| in_nav(k, e.kind) && !e.hidden)
             .map(|(k, _)| k)
     }
 
@@ -237,9 +263,65 @@ impl Site {
             .collect();
         v.sort_by_cached_key(|(k, is_dir)| {
             let (n, rest) = order_prefix(file_name(k));
-            (n.unwrap_or(u64::MAX), *is_dir, rest.to_lowercase())
+            // A folder takes the front matter order of its index page.
+            let meta_key = if *is_dir {
+                self.index_key(k)
+            } else {
+                Some(k.as_str())
+            };
+            let order = meta_key
+                .and_then(|m| self.entries.get(m))
+                .and_then(|e| e.order)
+                .or(n.map(|n| n as i64));
+            (order.unwrap_or(i64::MAX), *is_dir, rest.to_lowercase())
         });
         v
+    }
+
+    /// Every page we render, in sidebar order: each folder's index, then its contents.
+    fn reading_order(&self) -> Vec<Doc> {
+        fn walk(site: &Site, dir: &str, out: &mut Vec<Doc>) {
+            match site.dirs.get(dir) {
+                Some(DirIndex::Entry(k)) if site.entries[k].kind == Kind::Page => {
+                    out.push(Doc::Entry(k.clone()))
+                }
+                Some(DirIndex::Generated) => out.push(Doc::Listing(dir.to_string())),
+                _ => {}
+            }
+            let idx = site.index_key(dir);
+            for (k, is_dir) in site.children(dir) {
+                if is_dir {
+                    walk(site, &k, out);
+                } else if Some(k.as_str()) != idx && site.entries[&k].kind == Kind::Page {
+                    out.push(Doc::Entry(k));
+                }
+            }
+        }
+        let mut v = Vec::new();
+        walk(self, "", &mut v);
+        v
+    }
+
+    /// Resolve a [[wikilink]] name: a path ("guide/setup"), a file name ("setup",
+    /// "01-setup", "Setup Guide"), or a page title. Case, spaces and '_' vs '-' don't matter.
+    fn find_wiki(&self, name: &str) -> Option<&str> {
+        let norm = |s: &str| {
+            let s = s.trim().to_lowercase().replace([' ', '_'], "-");
+            s.strip_suffix(".md").map(str::to_string).unwrap_or(s)
+        };
+        let want = norm(name);
+        let pages = || self.entries.iter().filter(|(_, e)| e.kind == Kind::Page);
+        let no_ext = |k: &str| k.rsplit_once('.').map_or(k, |x| x.0).to_string();
+        pages()
+            .find(|(k, _)| norm(&no_ext(k)) == want || norm(&clean_dir(&no_ext(k))) == want)
+            .or_else(|| {
+                pages().find(|(k, _)| {
+                    let st = stem(k);
+                    norm(&st) == want || norm(display_name(&st)) == want
+                })
+            })
+            .or_else(|| pages().find(|(_, e)| norm(&e.title) == want))
+            .map(|(k, _)| k.as_str())
     }
 
     fn dir_title(&self, dir: &str) -> String {
@@ -260,6 +342,8 @@ struct ScanOpts {
     no_ignore: bool,
     /// Extra gitignore-style patterns from --exclude.
     exclude: Vec<String>,
+    /// Look up "last updated" dates and edit links in git.
+    git: bool,
 }
 
 /// Name of the gitignore-syntax file listing what to leave out of the site.
@@ -358,13 +442,25 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     let mut entries = BTreeMap::new();
     for k in keys.into_iter().filter(|k| k != CUSTOM_CSS) {
         let kind = kind_of(&k);
-        let title = if kind == Kind::Page {
-            page_title(&read_lossy(&root.join(&k)))
-                .unwrap_or_else(|| display_name(&stem(&k)).to_string())
+        let entry = if kind == Kind::Page {
+            let m = page_meta(&read_lossy(&root.join(&k)));
+            Entry {
+                kind,
+                title: m
+                    .title
+                    .unwrap_or_else(|| display_name(&stem(&k)).to_string()),
+                order: m.order,
+                hidden: m.hidden,
+            }
         } else {
-            file_name(&k).to_string()
+            Entry {
+                kind,
+                title: file_name(&k).to_string(),
+                order: None,
+                hidden: false,
+            }
         };
-        entries.insert(k, Entry { kind, title });
+        entries.insert(k, entry);
     }
     if !entries.values().any(|e| e.kind == Kind::Page) {
         return Err(format!("no markdown files found in {}", root.display()));
@@ -375,7 +471,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     dirs.insert(String::new(), DirIndex::Generated);
     for k in entries
         .iter()
-        .filter(|(k, e)| in_nav(k, e.kind))
+        .filter(|(k, e)| in_nav(k, e.kind) && !e.hidden)
         .map(|(k, _)| k)
     {
         let mut d = parent_dir(k);
@@ -454,12 +550,14 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or("Docs".into()),
     };
+    let git = if scan.git { git_info(&root) } else { None };
     Ok(Site {
         root,
         title,
         entries,
         dirs,
         out,
+        git,
     })
 }
 
@@ -520,6 +618,99 @@ fn crawl(root: &Path, start: &str) -> Vec<String> {
         });
     }
     seen.into_iter().collect()
+}
+
+// ---------------------------------------------------------------- git
+
+struct GitInfo {
+    toplevel: PathBuf,
+    /// "Edit this page" URL prefix; the file's path from the repo root is appended.
+    edit_base: Option<String>,
+    /// Last commit date (YYYY-MM-DD) per path relative to `toplevel`.
+    dates: HashMap<String, String>,
+}
+
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "core.quotePath=false"])
+        .args(args)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Web URL prefix for editing files, for GitHub and GitLab remotes.
+fn edit_url_base(remote: &str, branch: &str) -> Option<String> {
+    let r = remote.trim().trim_end_matches('/').trim_end_matches(".git");
+    let hostpath = if let Some(rest) = r.strip_prefix("git@") {
+        rest.replacen(':', "/", 1)
+    } else {
+        let rest = r.split_once("://")?.1;
+        rest.rsplit_once('@').map_or(rest, |x| x.1).to_string()
+    };
+    let (host, path) = hostpath.split_once('/')?;
+    match host {
+        "github.com" => Some(format!("https://github.com/{path}/edit/{branch}/")),
+        "gitlab.com" => Some(format!("https://gitlab.com/{path}/-/edit/{branch}/")),
+        _ => None,
+    }
+}
+
+fn git_info(root: &Path) -> Option<GitInfo> {
+    let toplevel = PathBuf::from(git(root, &["rev-parse", "--show-toplevel"])?)
+        .canonicalize()
+        .ok()?;
+    let mut branch = git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+    if branch.is_empty() || branch == "HEAD" {
+        branch = std::env::var("GITHUB_REF_NAME").unwrap_or_else(|_| "main".into());
+    }
+    let edit_base =
+        git(root, &["remote", "get-url", "origin"]).and_then(|r| edit_url_base(&r, &branch));
+    // One `git log` for the whole folder; the first date seen per file is its newest.
+    let log = git(root, &["log", "--format=@@%cs", "--name-only", "--", "."]).unwrap_or_default();
+    let mut dates = HashMap::new();
+    let mut current = String::new();
+    for line in log.lines() {
+        if let Some(d) = line.strip_prefix("@@") {
+            current = d.to_string();
+        } else if !line.is_empty() {
+            dates
+                .entry(line.to_string())
+                .or_insert_with(|| current.clone());
+        }
+    }
+    Some(GitInfo {
+        toplevel,
+        edit_base,
+        dates,
+    })
+}
+
+impl Site {
+    /// ("last updated" date, "edit this page" URL) for a source file, when known.
+    fn git_meta(&self, key: &str) -> (Option<&str>, Option<String>) {
+        let Some(g) = &self.git else {
+            return (None, None);
+        };
+        let Ok(rel) = self
+            .root
+            .join(key)
+            .strip_prefix(&g.toplevel)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+        else {
+            return (None, None);
+        };
+        let date = g.dates.get(&rel).map(String::as_str);
+        // Only link files git knows about; an untracked file has no page to edit yet.
+        let edit = date
+            .and(g.edit_base.as_ref())
+            .map(|b| format!("{b}{}", percent_encode_path(&rel)));
+        (date, edit)
+    }
 }
 
 // ---------------------------------------------------------------- links
@@ -726,6 +917,11 @@ fn md_options(id_prefix: Option<String>) -> Options<'static> {
     o.extension.tasklist = true;
     o.extension.footnotes = true;
     o.extension.alerts = true;
+    o.extension.front_matter_delimiter = Some("---".into());
+    o.extension.math_dollars = true;
+    o.extension.math_code = true;
+    o.extension.wikilinks_title_after_pipe = true;
+    o.extension.shortcodes = true;
     o.extension.header_id_prefix = id_prefix;
     o.extension.header_id_prefix_in_href = true;
     o.render.r#unsafe = true;
@@ -733,22 +929,52 @@ fn md_options(id_prefix: Option<String>) -> Options<'static> {
     o
 }
 
-fn page_title(md: &str) -> Option<String> {
+#[derive(Default)]
+struct Meta {
+    title: Option<String>,
+    order: Option<i64>,
+    hidden: bool,
+}
+
+/// Title (front matter `title:`, else the first `# heading`) plus the optional
+/// front matter fields. Front matter is a `---` block of simple `key: value` lines.
+fn page_meta(md: &str) -> Meta {
     let arena = Arena::new();
     let doc = parse_document(&arena, md, &md_options(None));
-    let h1 = doc
-        .descendants()
-        .find(|n| matches!(n.data.borrow().value, NodeValue::Heading(ref h) if h.level == 1))?;
-    let mut t = String::new();
-    for n in h1.descendants() {
-        match &n.data.borrow().value {
-            NodeValue::Text(s) => t.push_str(s),
-            NodeValue::Code(c) => t.push_str(&c.literal),
-            _ => {}
+    let mut meta = Meta::default();
+    let mut fm_title = None;
+    for n in doc.children() {
+        if let NodeValue::FrontMatter(fm) = &n.data.borrow().value {
+            for line in fm.lines() {
+                let Some((k, v)) = line.split_once(':') else {
+                    continue;
+                };
+                let v = v.trim().trim_matches(['"', '\'']).trim();
+                match k.trim() {
+                    "title" if !v.is_empty() => fm_title = Some(v.to_string()),
+                    "order" => meta.order = v.parse().ok(),
+                    "hidden" => meta.hidden = v == "true" || v == "yes",
+                    _ => {}
+                }
+            }
         }
     }
-    let t = t.trim().to_string();
-    (!t.is_empty()).then_some(t)
+    meta.title = fm_title.or_else(|| {
+        let h1 = doc
+            .descendants()
+            .find(|n| matches!(n.data.borrow().value, NodeValue::Heading(ref h) if h.level == 1))?;
+        let mut t = String::new();
+        for n in h1.descendants() {
+            match &n.data.borrow().value {
+                NodeValue::Text(s) => t.push_str(s),
+                NodeValue::Code(c) => t.push_str(&c.literal),
+                _ => {}
+            }
+        }
+        let t = t.trim().to_string();
+        (!t.is_empty()).then_some(t)
+    });
+    meta
 }
 
 // ---------------------------------------------------------------- syntax highlighting
@@ -782,12 +1008,15 @@ fn highlight_css() -> &'static str {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        // Each theme in its own media query so neither leaks rules into the other.
-        format!(
-            "@media (prefers-color-scheme: light) {{\n{}\n}}\n@media (prefers-color-scheme: dark) {{\n{}\n}}\n",
-            css(HL_LIGHT),
-            css(HL_DARK)
-        )
+        // Each theme applies on its own (OS setting unless the toggle chose one),
+        // so neither leaks rules into the other. Uses CSS nesting.
+        let theme = |css: String, name: &str, other: &str| {
+            format!(
+                "@media (prefers-color-scheme: {name}) {{ :root:not([data-theme={other}]) {{\n{css}\n}} }}\n\
+                 :root[data-theme={name}] {{\n{css}\n}}\n"
+            )
+        };
+        theme(css(HL_LIGHT), "light", "dark") + &theme(css(HL_DARK), "dark", "light")
     })
 }
 
@@ -924,6 +1153,24 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
     let dir = parent_dir(key);
     visit_urls(doc, &mut |url, is_img| ctx.rewrite(dir, url, is_img));
     for node in doc.descendants() {
+        if let NodeValue::WikiLink(w) = &mut node.data.borrow_mut().value {
+            // [[Page#Some heading]]: the heading part becomes its anchor id.
+            let (name, frag) = match w.url.split_once('#') {
+                Some((n, f)) => (n.to_string(), Some(comrak::Anchorizer::new().anchorize(f))),
+                None => (w.url.clone(), None),
+            };
+            let target = if name.is_empty() {
+                Some(key)
+            } else {
+                ctx.site.find_wiki(&name)
+            };
+            match target.and_then(|k| ctx.href(k, false, frag.as_deref())) {
+                Some(h) => w.url = h,
+                None => ctx.warn(format!("[[{}]]: no page with that name", w.url)),
+            }
+        }
+    }
+    for node in doc.descendants() {
         let mut data = node.data.borrow_mut();
         let replacement = match &data.value {
             NodeValue::CodeBlock(cb) if cb.info.split_whitespace().next() == Some("mermaid") => {
@@ -977,6 +1224,124 @@ fn render_listing(ctx: &Ctx, dir: &str) -> String {
     h + "</ul>\n"
 }
 
+/// (level, id, inner html) for the h2/h3 headings in rendered html.
+fn toc_entries(html: &str) -> Vec<(u8, String, String)> {
+    let mut v = Vec::new();
+    let mut rest = html;
+    while let Some(i) = rest.find("<h") {
+        rest = &rest[i + 2..];
+        let level = match rest.as_bytes().first() {
+            Some(b'2') => 2,
+            Some(b'3') => 3,
+            _ => continue,
+        };
+        let Some(after) = rest[1..].strip_prefix(" id=\"") else {
+            continue;
+        };
+        let Some(q) = after.find('"') else { break };
+        let id = &after[..q];
+        let Some(gt) = after.find('>') else { break };
+        let close = format!("</h{level}>");
+        let Some(end) = after.find(&close) else { break };
+        let inner = &after[gt + 1..end];
+        // Drop the trailing hover anchor, then any remaining tags.
+        let inner = inner.find("<a href=\"#").map_or(inner, |a| &inner[..a]);
+        let mut text = String::new();
+        let mut in_tag = false;
+        for c in inner.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                c if !in_tag => text.push(c),
+                _ => {}
+            }
+        }
+        v.push((level, id.to_string(), text.trim().to_string()));
+        rest = &after[end..];
+    }
+    v
+}
+
+fn render_toc(html: &str) -> String {
+    let entries = toc_entries(html);
+    if entries.len() < 2 {
+        return String::new();
+    }
+    let mut h =
+        String::from("<aside class=\"toc\">\n<p class=\"toc-title\">On this page</p>\n<ul>\n");
+    for (level, id, text) in entries {
+        h += &format!(
+            "<li class=\"toc-h{level}\"><a href=\"#{}\">{text}</a></li>\n",
+            esc(&id)
+        );
+    }
+    h + "</ul>\n</aside>\n"
+}
+
+impl Ctx<'_> {
+    fn doc_link(&self, d: &Doc) -> Option<(String, String)> {
+        let site = self.site;
+        match d {
+            Doc::Entry(k) => Some((self.href(k, false, None)?, site.entries[k].title.clone())),
+            Doc::Listing(dir) => Some((self.href(dir, true, None)?, site.dir_title(dir))),
+        }
+    }
+
+    /// Previous / next links, following the sidebar order.
+    fn pager(&self, order: &[Doc], current: &Doc) -> String {
+        let Some(i) = order.iter().position(|d| d == current) else {
+            return String::new();
+        };
+        let link = |d: Option<&Doc>, class: &str, label: &str| {
+            d.and_then(|d| self.doc_link(d))
+                .map(|(href, title)| {
+                    format!(
+                        "<a class=\"{class}\" href=\"{}\"><span>{label}</span>{}</a>",
+                        esc(&href),
+                        esc(&title)
+                    )
+                })
+                .unwrap_or_default()
+        };
+        let prev = link(
+            i.checked_sub(1).and_then(|p| order.get(p)),
+            "prev",
+            "Previous",
+        );
+        let next = link(order.get(i + 1), "next", "Next");
+        if prev.is_empty() && next.is_empty() {
+            return String::new();
+        }
+        format!("<nav class=\"pager\">{prev}{next}</nav>\n")
+    }
+
+    /// "Last updated · Edit this page" line for a source file.
+    fn page_meta_line(&self, key: &str) -> String {
+        let (date, edit) = self.site.git_meta(key);
+        let mut parts = Vec::new();
+        if let Some(d) = date {
+            parts.push(format!("Last updated {d}"));
+        }
+        if let Some(e) = edit {
+            parts.push(format!("<a href=\"{}\">Edit this page</a>", esc(&e)));
+        }
+        if parts.is_empty() {
+            return String::new();
+        }
+        format!("<p class=\"page-meta\">{}</p>\n", parts.join(" · "))
+    }
+
+    /// Article with its footer (meta line, pager) and table of contents.
+    fn wrap(&self, content: &str, key: Option<&str>, order: &[Doc], doc: &Doc) -> String {
+        let meta = key.map(|k| self.page_meta_line(k)).unwrap_or_default();
+        format!(
+            "<div class=\"page-wrap\">\n<article>\n{content}{meta}{}</article>\n{}</div>\n",
+            self.pager(order, doc),
+            render_toc(content)
+        )
+    }
+}
+
 fn tag(key: &str, kind: Kind) -> String {
     if kind == Kind::Page {
         String::new()
@@ -1005,7 +1370,10 @@ fn render_nav(ctx: &Ctx, active: Option<&str>) -> String {
         )
     };
     let root = link("", true, &site.title, "").replacen("<a ", "<a data-site ", 1);
-    format!("{root}\n{}", nav_dir(site, "", &link))
+    format!(
+        "<div class=\"nav-head\">{root}<button class=\"menu-toggle\" aria-label=\"Menu\" aria-expanded=\"false\">☰</button>{THEME_BUTTON}</div>\n{}",
+        nav_dir(site, "", &link)
+    )
 }
 
 fn nav_dir(site: &Site, dir: &str, link: &dyn Fn(&str, bool, &str, &str) -> String) -> String {
@@ -1038,15 +1406,28 @@ struct Page<'a> {
     tail: &'a str,
 }
 
+const THEME_BUTTON: &str = "<button class=\"theme-toggle\" aria-label=\"Toggle dark mode\" title=\"Toggle dark mode\"></button>";
+/// Applies a saved light/dark choice before first paint.
+const THEME_INIT: &str = "<script>try{const t=localStorage.getItem('webolator-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>";
+const KATEX_CSS: &str = "https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css";
+const KATEX_JS: &str = "https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js";
+
 fn page_html(p: &Page) -> String {
     let nav = match &p.nav {
         Some(n) => format!("<nav class=\"side\">\n{n}</nav>\n"),
-        None => String::new(),
+        None => format!("<div class=\"corner\">{THEME_BUTTON}</div>\n"),
+    };
+    let math = if p.body.contains("data-math-style=") {
+        format!(
+            "<link rel=\"stylesheet\" href=\"{KATEX_CSS}\">\n<script defer src=\"{KATEX_JS}\"></script>\n"
+        )
+    } else {
+        String::new()
     };
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{}</title>\n<style>{STYLE}{}</style>\n{}</head>\n<body>\n{nav}<main>\n{}</main>\n{}</body>\n</html>\n",
+         <title>{}</title>\n{THEME_INIT}\n<style>{STYLE}{}</style>\n{math}{}</head>\n<body>\n{nav}<main>\n{}</main>\n<script>{COMMON_JS}</script>\n{}</body>\n</html>\n",
         esc(p.title),
         if p.body.contains("class=\"hl-") {
             highlight_css()
@@ -1059,15 +1440,15 @@ fn page_html(p: &Page) -> String {
     )
 }
 
+/// Loads mermaid; common.js drives rendering (and re-rendering on theme change).
+/// Static pages render everything at once; single-file pages render per section.
 fn mermaid_script(src: &str, single: bool) -> String {
-    let init = if single {
-        "window.webolatorMermaid = (el) => mermaid.run({nodes: el.querySelectorAll('pre.mermaid:not([data-processed])')});"
+    let run = if single {
+        ""
     } else {
-        "mermaid.run();"
+        "<script>webolatorMermaidRun(document)</script>\n"
     };
-    format!(
-        "{src}\n<script>\nmermaid.initialize({{startOnLoad: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'}});\n{init}\n</script>\n"
-    )
+    format!("{src}\n{run}")
 }
 
 // ---------------------------------------------------------------- outputs
@@ -1141,9 +1522,11 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         t
     };
 
+    let order = site.reading_order();
     let render = |from_out: &str,
                   from_label: &str,
                   title: &str,
+                  doc: Doc,
                   body_fn: &dyn Fn(&Ctx) -> String|
      -> Result<(), String> {
         let ctx = Ctx {
@@ -1154,7 +1537,11 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             assets: &assets,
             warnings: &warnings,
         };
-        let body = format!("<article>\n{}</article>\n", body_fn(&ctx));
+        let key = match &doc {
+            Doc::Entry(k) => Some(k.as_str()),
+            Doc::Listing(_) => None,
+        };
+        let body = ctx.wrap(&body_fn(&ctx), key, &order, &doc);
         let nav = show_nav(site).then(|| render_nav(&ctx, Some(from_out)));
         let tail = tail_for(from_out, &body);
         let head = head_for(from_out);
@@ -1175,7 +1562,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             .as_bytes(),
         )?;
         for w in warnings.borrow_mut().drain(..) {
-            eprintln!("warning: {from_label}: {w}");
+            print_warning(from_label, &w);
         }
         Ok(())
     };
@@ -1183,7 +1570,9 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
     for (k, e) in &site.entries {
         let out = &site.out[k];
         if e.kind == Kind::Page {
-            render(out, k, &e.title, &|ctx| render_markdown(ctx, k))?;
+            render(out, k, &e.title, Doc::Entry(k.clone()), &|ctx| {
+                render_markdown(ctx, k)
+            })?;
         } else {
             write(out, &fs::read(site.root.join(k)).map_err(io)?)?;
         }
@@ -1191,9 +1580,13 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
     for (d, idx) in &site.dirs {
         if matches!(idx, DirIndex::Generated) {
             let out = join_key(&clean_dir(d), "index.html");
-            render(&out, &out, &site.dir_title(d), &|ctx| {
-                render_listing(ctx, d)
-            })?;
+            render(
+                &out,
+                &out,
+                &site.dir_title(d),
+                Doc::Listing(d.clone()),
+                &|ctx| render_listing(ctx, d),
+            )?;
         }
     }
     let generated = site
@@ -1215,16 +1608,22 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         assets: &assets,
         warnings: &warnings,
     };
-    let section = |id: &str, title: &str, inner: &str| {
+    let order = site.reading_order();
+    let section = |id: &str, title: &str, doc: Doc, inner: &str| {
+        let key = match &doc {
+            Doc::Entry(k) => Some(k.clone()),
+            Doc::Listing(_) => None,
+        };
+        let wrapped = ctx_for(id.to_string()).wrap(inner, key.as_deref(), &order, &doc);
         format!(
-            "<section class=\"page\" id=\"{}\" data-title=\"{}\" hidden>\n<article>\n{inner}</article>\n</section>\n",
+            "<section class=\"page\" id=\"{}\" data-title=\"{}\" hidden>\n{wrapped}</section>\n",
             esc(id),
             esc(title)
         )
     };
     let flush = |label: &str| {
         for w in warnings.borrow_mut().drain(..) {
-            eprintln!("warning: {label}: {w}");
+            print_warning(label, &w);
         }
     };
 
@@ -1235,6 +1634,7 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
             body += &section(
                 &id,
                 &site.dir_title(d),
+                Doc::Listing(d.clone()),
                 &render_listing(&ctx_for(id.clone()), d),
             );
         }
@@ -1259,7 +1659,7 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
             }
             Kind::Other => continue,
         };
-        body += &section(&id, &e.title, &inner);
+        body += &section(&id, &e.title, Doc::Entry(k.clone()), &inner);
         flush(k);
     }
     // PDFs etc. listed in nav are opened as blobs.
@@ -1449,6 +1849,7 @@ fn run() -> Result<(), String> {
         skip: None,
         no_ignore: cli.no_ignore,
         exclude: cli.exclude.clone(),
+        git: !cli.no_git,
     };
     if cli.serve {
         return serve(cli.input, cli.port, opts, scan);
@@ -1478,6 +1879,13 @@ fn run() -> Result<(), String> {
             if n == 1 { "" } else { "s" },
             out.display()
         );
+    }
+    let problems = WARNINGS.load(Ordering::SeqCst);
+    if cli.check && problems > 0 {
+        return Err(format!(
+            "--check: {problems} link problem{} found",
+            if problems == 1 { "" } else { "s" }
+        ));
     }
     Ok(())
 }

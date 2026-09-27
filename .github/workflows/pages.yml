@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for "last updated" dates
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -40,7 +42,7 @@ jobs:
 
       - name: Build site
         run: |
-          ./target/release/webolator docs -o _site
+          ./target/release/webolator docs -o _site --check
           ./target/release/webolator examples/demo -o _site/demo
           ./target/release/webolator docs --single -o _site/webolator-docs.html
 
