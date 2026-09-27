@@ -183,7 +183,7 @@ impl Site {
     fn dir_out(&self, dir: &str) -> Option<String> {
         match self.dirs.get(dir)? {
             DirIndex::Entry(k) => self.out.get(k).cloned(),
-            DirIndex::Generated => Some(join_key(dir, "index.html")),
+            DirIndex::Generated => Some(join_key(&clean_dir(dir), "index.html")),
         }
     }
 
@@ -208,11 +208,32 @@ impl Site {
         }
     }
 
+    /// Navigable entries and subdirectories directly in `dir`, as (key, is_dir).
+    /// Ordered by numeric prefix ("01-"), then files before folders, then name.
+    fn children(&self, dir: &str) -> Vec<(String, bool)> {
+        let mut v: Vec<(String, bool)> = self
+            .nav_keys()
+            .filter(|k| parent_dir(k) == dir)
+            .map(|k| (k.clone(), false))
+            .chain(
+                self.dirs
+                    .keys()
+                    .filter(|d| !d.is_empty() && parent_dir(d) == dir)
+                    .map(|d| (d.clone(), true)),
+            )
+            .collect();
+        v.sort_by_cached_key(|(k, is_dir)| {
+            let (n, rest) = order_prefix(file_name(k));
+            (n.unwrap_or(u64::MAX), *is_dir, rest.to_lowercase())
+        });
+        v
+    }
+
     fn dir_title(&self, dir: &str) -> String {
         if dir.is_empty() {
             self.title.clone()
         } else {
-            file_name(dir).to_string()
+            display_name(file_name(dir)).to_string()
         }
     }
 }
@@ -288,7 +309,8 @@ fn load_site(input: &Path, skip: Option<&Path>) -> Result<Site, String> {
     for k in keys {
         let kind = kind_of(&k);
         let title = if kind == Kind::Page {
-            page_title(&read_lossy(&root.join(&k))).unwrap_or_else(|| stem(&k))
+            page_title(&read_lossy(&root.join(&k)))
+                .unwrap_or_else(|| display_name(&stem(&k)).to_string())
         } else {
             file_name(&k).to_string()
         };
@@ -336,16 +358,16 @@ fn load_site(input: &Path, skip: Option<&Path>) -> Result<Site, String> {
     let mut taken: HashSet<String> = entries
         .iter()
         .filter(|(_, e)| e.kind != Kind::Page)
-        .map(|(k, _)| k.clone())
+        .map(|(k, _)| join_key(&clean_dir(parent_dir(k)), file_name(k)))
         .collect();
     for (d, idx) in &dirs {
         if matches!(idx, DirIndex::Generated) {
-            taken.insert(join_key(d, "index.html"));
+            taken.insert(join_key(&clean_dir(d), "index.html"));
         }
     }
     for (k, e) in &entries {
         if e.kind != Kind::Page {
-            out.insert(k.clone(), k.clone());
+            out.insert(k.clone(), join_key(&clean_dir(parent_dir(k)), file_name(k)));
         }
     }
     // Page -> directory it is the index of. BTreeMap order puts "" first, so the
@@ -362,12 +384,12 @@ fn load_site(input: &Path, skip: Option<&Path>) -> Result<Site, String> {
         }
         let dir = parent_dir(k);
         let want = if let Some(d) = index_pages.get(k) {
-            join_key(d, "index.html")
+            join_key(&clean_dir(d), "index.html")
         } else {
-            join_key(dir, &format!("{}.html", stem(k)))
+            join_key(&clean_dir(dir), &format!("{}.html", display_name(&stem(k))))
         };
         let path = if taken.contains(&want) {
-            format!("{k}.html")
+            join_key(&clean_dir(dir), &format!("{}.html", file_name(k)))
         } else {
             want
         };
@@ -389,6 +411,29 @@ fn load_site(input: &Path, skip: Option<&Path>) -> Result<Site, String> {
         dirs,
         out,
     })
+}
+
+/// Split an ordering prefix off a file or folder name: "01-usage.md" -> (Some(1), "usage.md").
+/// The prefix is digits followed by '-', '_' or ' ', and only counts if a name follows.
+fn order_prefix(name: &str) -> (Option<u64>, &str) {
+    let digits = name.bytes().take_while(u8::is_ascii_digit).count();
+    let rest = &name[digits..];
+    match rest.strip_prefix(['-', '_', ' ']) {
+        Some(r) if digits > 0 && !r.is_empty() => (name[..digits].parse().ok(), r),
+        _ => (None, name),
+    }
+}
+
+fn display_name(name: &str) -> &str {
+    order_prefix(name).1
+}
+
+/// Output directory for a source directory: ordering prefixes removed from every component.
+fn clean_dir(dir: &str) -> String {
+    dir.split('/')
+        .map(display_name)
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn stem(key: &str) -> String {
@@ -862,26 +907,20 @@ fn render_listing(ctx: &Ctx, dir: &str) -> String {
         "<h1>{}</h1>\n<ul class=\"listing\">\n",
         esc(&site.dir_title(dir))
     );
-    for sub in site
-        .dirs
-        .keys()
-        .filter(|d| !d.is_empty() && parent_dir(d) == dir)
-    {
-        if let Some(href) = ctx.href(sub, true, None) {
-            h += &format!(
-                "<li><a href=\"{}\">{}/</a></li>\n",
-                esc(&href),
-                esc(file_name(sub))
-            );
-        }
-    }
-    for k in site.nav_keys().filter(|k| parent_dir(k) == dir) {
-        if let Some(href) = ctx.href(k, false, None) {
+    for (k, is_dir) in site.children(dir) {
+        let Some(href) = ctx.href(&k, is_dir, None) else {
+            continue;
+        };
+        if is_dir {
+            let name = display_name(file_name(&k));
+            h += &format!("<li><a href=\"{}\">{}/</a></li>\n", esc(&href), esc(name));
+        } else {
+            let e = &site.entries[&k];
             h += &format!(
                 "<li><a href=\"{}\">{}</a>{}</li>\n",
                 esc(&href),
-                esc(&site.entries[k].title),
-                tag(k, site.entries[k].kind)
+                esc(&e.title),
+                tag(&k, e.kind)
             );
         }
     }
@@ -922,23 +961,17 @@ fn render_nav(ctx: &Ctx, active: Option<&str>) -> String {
 fn nav_dir(site: &Site, dir: &str, link: &dyn Fn(&str, bool, &str, &str) -> String) -> String {
     let idx = site.index_key(dir);
     let mut h = String::from("<ul>\n");
-    for k in site
-        .nav_keys()
-        .filter(|k| parent_dir(k) == dir && Some(k.as_str()) != idx)
-    {
-        let e = &site.entries[k];
-        h += &format!("<li>{}</li>\n", link(k, false, &e.title, &tag(k, e.kind)));
-    }
-    for sub in site
-        .dirs
-        .keys()
-        .filter(|d| !d.is_empty() && parent_dir(d) == dir)
-    {
-        h += &format!(
-            "<li><details open><summary>{}</summary>\n{}</details></li>\n",
-            link(sub, true, file_name(sub), ""),
-            nav_dir(site, sub, link)
-        );
+    for (k, is_dir) in site.children(dir) {
+        if is_dir {
+            h += &format!(
+                "<li><details open><summary>{}</summary>\n{}</details></li>\n",
+                link(&k, true, display_name(file_name(&k)), ""),
+                nav_dir(site, &k, link)
+            );
+        } else if Some(k.as_str()) != idx {
+            let e = &site.entries[&k];
+            h += &format!("<li>{}</li>\n", link(&k, false, &e.title, &tag(&k, e.kind)));
+        }
     }
     h + "</ul>\n"
 }
@@ -1080,7 +1113,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
     }
     for (d, idx) in &site.dirs {
         if matches!(idx, DirIndex::Generated) {
-            let out = join_key(d, "index.html");
+            let out = join_key(&clean_dir(d), "index.html");
             render(&out, &out, &site.dir_title(d), &|ctx| {
                 render_listing(ctx, d)
             })?;

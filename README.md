@@ -73,6 +73,8 @@ cargo run -- examples/demo --serve
 | any other file | copied as is |
 | hidden files and folders, `node_modules`, `target`, `venv` | skipped |
 
+Number prefixes like `01-usage.md` or `02-guides/` set the sidebar order. They don't appear in labels and are removed from URLs, so `02-guides/01-setup.md` becomes `guides/setup.html`.
+
 If you pass a **single file**, webolator follows its local links, including links to parent folders. The site then contains that file, which becomes the home page, plus everything reachable from it.
 
 In **`--single` mode**, each page becomes a section with hash routing, so the back and forward buttons and deep links like `docs.html#p-guide-install--setup` work. Images are inlined. Linked HTML files are shown in an iframe and text files as preformatted text, and PDFs and other files open from embedded blobs.

@@ -31,6 +31,10 @@ Every markdown file becomes a page. Each folder gets an `index.html`:
 | any other file | copied as is |
 | hidden files and folders, `node_modules`, `target`, `venv` | skipped |
 
+## Ordering
+
+The sidebar is sorted by name, with files before folders. To choose the order, give files and folders a number prefix such as `01-usage.md` or `02-guides/`. Numbered items come first, in numeric order. The prefix doesn't appear in labels, and it's removed from output paths too, so `02-guides/01-setup.md` becomes `guides/setup.html`. Links in your markdown still use the real file names.
+
 The site title is the first heading of the root `README.md` or `index.md`. If there is neither, the folder name is used.
 
 ## A single file
@@ -55,4 +59,4 @@ This serves the site on `http://127.0.0.1:8000/`. The site is rebuilt whenever a
 webolator docs/ --single -o docs.html
 ```
 
-See [Single-file output](features/single-file.md).
+See [Single-file output](03-features/03-single-file.md).
