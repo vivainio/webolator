@@ -5,20 +5,27 @@ order: 3
 
 # Syntax reference
 
-Every markdown form webolator understands, each with its source and how it renders on this page. Anything not listed here is standard [CommonMark](https://commonmark.org).
+Every markdown form webolator understands. Standard markdown gets a quick summary, and the special forms are shown with their source and how they render on this page.
 
-## Text
+## Standard markdown
 
-| Form | Source | Result |
-|---|---|---|
-| Bold, italic | `**bold**`, `*italic*` | **bold**, *italic* |
-| Strikethrough | `~~gone~~` | ~~gone~~ |
-| Inline code | `` `code` `` | `code` |
-| Emoji shortcode | `:rocket: :tada: :+1:` | :rocket: :tada: :+1: |
-| Inline math | `$a^2 + b^2 = c^2$` | $a^2 + b^2 = c^2$ |
-| Keyboard (raw HTML) | `<kbd>Ctrl</kbd>+<kbd>C</kbd>` | <kbd>Ctrl</kbd>+<kbd>C</kbd> |
+Everything in [GitHub-flavored markdown](https://github.github.com/gfm/) works as expected: headings, **bold**, *italic*, ~~strikethrough~~, `inline code`, lists, `- [x]` task lists, tables (with `:---:` alignment), block quotes, footnotes[^fn], images, horizontal rules, and autolinks for bare `https://…` and `www.…` URLs.
 
-Emoji shortcodes use GitHub's names. A shortcode that isn't recognized is left as typed.
+Raw HTML such as `<details>`, `<kbd>`, `<sup>` and `<img width=…>` is passed through as is, and its `href` and `src` attributes are rewritten like markdown links.
+
+A few details specific to webolator:
+
+- The first `#` heading is the page title.
+- Every heading gets a GitHub-style anchor id, so `## Step two` becomes `#step-two`.
+- `##` and `###` headings fill the "On this page" sidebar.
+- Clicking an image zooms it.
+- Images are inlined in `--single` output.
+
+[^fn]: Like this one.
+
+## Emoji
+
+Shortcodes use GitHub's names: `:rocket: :tada: :+1:` becomes :rocket: :tada: :+1:. A shortcode that isn't recognized is left as typed.
 
 ## Links
 
@@ -29,55 +36,13 @@ Emoji shortcodes use GitHub's names. A shortcode that isn't recognized is left a
 | Link to a folder | `[features](03-features/)` goes to that folder's index page |
 | Root-relative link | `[x](/01-usage.md)`, relative to the docs root |
 | Wikilink | `[[Usage]]`, `[[03-features/01-mermaid]]`, `[[Usage\|custom text]]`, `[[Usage#Ordering]]`, `[[#Links]]` |
-| Autolink | `https://example.com` and `www.example.com` become links |
 | Any other file | `[log](build.log)`, `[spec](spec.pdf)`, `[report](report.html)` |
 
 For example, `[[Usage#Ordering]]` renders as [[Usage#Ordering]]. See [Links](02-links.md) for how each form is rewritten and [Wikilinks](03-features/05-writing.md#wikilinks) for how names are matched.
 
-## Headings
+## Alerts
 
-`#` to `######`. Each heading gets a GitHub-style anchor id, so `## Step two` gets `#step-two`. The first `#` heading is the page title. The `##` and `###` headings fill the "On this page" sidebar.
-
-## Lists
-
-````markdown
-- bullet
-  1. numbered, nested
-- [x] a done task
-- [ ] an open task
-````
-
-- bullet
-  1. numbered, nested
-- [x] a done task
-- [ ] an open task
-
-## Tables
-
-````markdown
-| Left | Center | Right |
-|:-----|:------:|------:|
-| a    |   b    |     c |
-````
-
-| Left | Center | Right |
-|:-----|:------:|------:|
-| a    |   b    |     c |
-
-Inside a table, write `\|` for a literal `|`.
-
-## Quotes and alerts
-
-````markdown
-> A plain quote.
-
-> [!NOTE]
-> Useful information.
-````
-
-> A plain quote.
-
-The five GitHub alert types:
+GitHub-style callouts, in five types:
 
 > [!NOTE]
 > `> [!NOTE]`: useful information.
@@ -93,18 +58,6 @@ The five GitHub alert types:
 
 > [!CAUTION]
 > `> [!CAUTION]`: a risk of something going wrong.
-
-## Footnotes
-
-````markdown
-A claim.[^source]
-
-[^source]: The footnote text, collected at the bottom of the page.
-````
-
-A claim.[^source]
-
-[^source]: The footnote text, collected at the bottom of the page.
 
 ## Code blocks
 
@@ -158,21 +111,6 @@ f(x) &= (x + 1)^2 \\
 ```
 
 Math is rendered with [KaTeX](https://katex.org/docs/supported.html). As on GitHub, a `$` followed by a digit doesn't close math, so "costs $5 and $10" stays plain text.
-
-## Images
-
-`![alt text](path/to/image.png)` or raw `<img src="…" width="200">`. Both get their paths rewritten and are inlined in `--single` output. Click an image to zoom.
-
-## Raw HTML
-
-HTML is passed through as is, so `<details>`, `<kbd>`, `<sub>`, `<sup>`, `<br>` and `<img width=…>` all work. `href` and `src` attributes in it are rewritten like markdown links.
-
-<details>
-<summary>A collapsible section (<code>&lt;details&gt;</code>)</summary>
-
-Content that stays hidden until the summary is clicked.
-
-</details>
 
 ## Front matter
 
