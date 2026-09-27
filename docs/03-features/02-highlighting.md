@@ -29,4 +29,4 @@ done
 { "name": "webolator", "config": null }
 ```
 
-Use the language's name or file extension after the fence (`rust`, `py`, `sh` and so on). A block with no language, or a language syntect doesn't know, is shown as plain text.
+Use the language's name or file extension after the fence (`rust`, `py`, `sh` and so on). A block with no language, or a language syntect doesn't know, is shown as plain text. The [Syntax reference](../syntax.md#code-blocks) lists every supported language.

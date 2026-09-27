@@ -1,6 +1,6 @@
 # Writing
 
-Everything from GitHub-flavored markdown works: tables, task lists, footnotes, strikethrough, autolinks and `> [!NOTE]` alerts. webolator adds a few extras on top.
+Everything from GitHub-flavored markdown works: tables, task lists, footnotes, strikethrough, autolinks and `> [!NOTE]` alerts. webolator adds a few extras on top. The [Syntax reference](../syntax.md) lists every form with an example.
 
 ## Math
 
