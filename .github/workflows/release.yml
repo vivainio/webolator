@@ -1,16 +1,19 @@
 name: Release
 
+# Runs when a GitHub Release is published, e.g.:
+#   gh release create v1.2.3 --generate-notes
+# Builds binaries (attached to that release) and wheels (published to PyPI).
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.release.tag_name }}
 
 jobs:
   build:
-    name: Build and Release
+    name: Build binary (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -50,6 +53,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-${{ matrix.target }}-
 
+    - name: Set version from release tag
+      shell: bash
+      run: sed -i.bak "s/^version = \"0.0.0-dev\"/version = \"${TAG#v}\"/" Cargo.toml
+
     - name: Build release binary
       run: cargo build --release --target ${{ matrix.target }}
 
@@ -73,67 +80,24 @@ jobs:
         name: ${{ matrix.archive-name }}
         path: ${{ matrix.archive-name }}
 
-  release:
-    name: Create Release
+  upload-binaries:
+    name: Attach binaries to release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
         path: artifacts/
+        pattern: webolator-*
+        merge-multiple: true
 
-    - name: Move artifacts to root
-      run: |
-        find artifacts/ -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} . \;
-
-    - name: Extract version from tag
-      id: version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ github.ref_name }}
-        name: Release ${{ github.ref_name }}
-        body: |
-          ## webolator ${{ steps.version.outputs.VERSION }}
-          
-          Zero-config markdown to website, with mermaid and syntax highlighting.
-          
-          ### Installation
-          
-          `uv tool install webolator`, or download the appropriate binary for your platform:
-          - **Linux (x86_64)**: `webolator-linux-x86_64.tar.gz`
-          - **Windows (x86_64)**: `webolator-windows-x86_64.zip`  
-          - **macOS (Intel)**: `webolator-macos-x86_64.tar.gz`
-          - **macOS (Apple Silicon)**: `webolator-macos-arm64.tar.gz`
-          
-          ### Usage
-          
-          ```bash
-          webolator docs/            # static site in ./site
-          webolator docs/ --single   # one self-contained HTML file
-          webolator docs/ --serve    # live-reload preview
-          ```
-          
-          ### Changes
-          
-          See the [commit history](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for details.
-        files: |
-          webolator-linux-x86_64.tar.gz
-          webolator-windows-x86_64.zip
-          webolator-macos-x86_64.tar.gz
-          webolator-macos-arm64.tar.gz
-        draft: false
-        prerelease: false
+    - name: Upload to release
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: gh release upload "$TAG" artifacts/* --clobber --repo "${{ github.repository }}"
 
   build-wheels:
     name: Build wheel (${{ matrix.target }})
@@ -153,11 +117,9 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set version from tag
+    - name: Set version from release tag
       shell: bash
-      run: |
-        cargo install cargo-edit --locked
-        cargo set-version "${GITHUB_REF#refs/tags/v}"
+      run: sed -i.bak "s/^version = \"0.0.0-dev\"/version = \"${TAG#v}\"/" Cargo.toml
 
     - name: Build wheel
       uses: PyO3/maturin-action@v1
@@ -190,4 +152,4 @@ jobs:
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        packages-dir: dist/ 
+        packages-dir: dist/
