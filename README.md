@@ -2,6 +2,8 @@
 
 Turn a folder of markdown, or a single `.md` file, into a browsable website. No config file, no index file, no `SUMMARY.md`.
 
+**Docs:** https://vivainio.github.io/webolator/ (built with webolator, of course)
+
 - **Zero config.** Point it at a folder and the navigation comes from the directory tree. Page titles come from the first `# heading`.
 - **Mermaid.** ```` ```mermaid ```` blocks become diagrams, rendered in the browser.
 - **Syntax highlighting** happens at build time (syntect), with light and dark themes and no JavaScript.
