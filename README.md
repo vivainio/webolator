@@ -12,7 +12,34 @@ Turn a folder of markdown, or a single `.md` file, into a browsable website. No 
 - GitHub-flavored markdown: tables, task lists, footnotes, strikethrough, autolinks and `> [!NOTE]` alerts.
 - Light and dark mode follow the OS setting.
 
-## Install
+## Installation
+
+### Using uv (easiest)
+
+Install the published wheel from PyPI as a standalone tool:
+
+```bash
+uv tool install webolator
+```
+
+This puts the `webolator` command on your PATH. To try it without installing anything:
+
+```bash
+uvx webolator docs/ --serve
+```
+
+### Pre-built binaries
+
+Download the latest release for your platform from the [GitHub Releases](https://github.com/vivainio/webolator/releases) page:
+
+- **Linux (x86_64)**: `webolator-linux-x86_64.tar.gz`
+- **Windows (x86_64)**: `webolator-windows-x86_64.zip`
+- **macOS (Intel)**: `webolator-macos-x86_64.tar.gz`
+- **macOS (Apple Silicon)**: `webolator-macos-arm64.tar.gz`
+
+Extract the archive and place the `webolator` binary in your PATH.
+
+### From source
 
 ```bash
 cargo install --git https://github.com/vivainio/webolator
