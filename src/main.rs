@@ -16,7 +16,6 @@ use comrak::options::Plugins;
 use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
 use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 use std::sync::OnceLock;
-use walkdir::WalkDir;
 
 const MERMAID_CDN: &str = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
 const STYLE: &str = include_str!("style.css");
@@ -91,6 +90,12 @@ struct Cli {
     /// Extra stylesheet applied after the built-in styles (in addition to <root>/webolator.css)
     #[arg(long)]
     css: Option<PathBuf>,
+    /// Leave out files matching this gitignore-style pattern (repeatable)
+    #[arg(long, value_name = "GLOB")]
+    exclude: Vec<String>,
+    /// Include files that .gitignore / .ignore would leave out (.webolatorignore still applies)
+    #[arg(long)]
+    no_ignore: bool,
 }
 
 // ---------------------------------------------------------------- site model
@@ -246,30 +251,67 @@ impl Site {
     }
 }
 
-fn scan_dir(root: &Path, skip: Option<&Path>) -> Vec<String> {
-    WalkDir::new(root)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_entry(|e| {
+/// Which files a folder scan leaves out, beyond the built-in rules.
+#[derive(Clone, Default)]
+struct ScanOpts {
+    /// A directory to leave out entirely (the output directory).
+    skip: Option<PathBuf>,
+    /// Don't honor .gitignore / .ignore files.
+    no_ignore: bool,
+    /// Extra gitignore-style patterns from --exclude.
+    exclude: Vec<String>,
+}
+
+/// Name of the gitignore-syntax file listing what to leave out of the site.
+const IGNORE_FILE: &str = ".webolatorignore";
+
+/// All publishable files under `root`, as sorted '/'-separated relative paths.
+/// Skips hidden files, SKIP_DIRS, earlier output dirs, and anything matched by
+/// .gitignore / .ignore (unless no_ignore), .webolatorignore or --exclude.
+fn scan_dir(root: &Path, opts: &ScanOpts) -> Result<Vec<String>, String> {
+    let mut overrides = ignore::overrides::OverrideBuilder::new(root);
+    for pat in &opts.exclude {
+        overrides
+            .add(&format!("!{pat}"))
+            .map_err(|e| format!("--exclude {pat}: {e}"))?;
+    }
+    let overrides = overrides.build().map_err(|e| e.to_string())?;
+    let honor_git = !opts.no_ignore;
+    let skip = opts.skip.clone();
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(true)
+        .git_ignore(honor_git)
+        .git_exclude(honor_git)
+        .git_global(honor_git)
+        .ignore(honor_git)
+        .parents(honor_git)
+        .require_git(false)
+        .add_custom_ignore_filename(IGNORE_FILE)
+        .overrides(overrides)
+        .sort_by_file_name(|a, b| a.cmp(b))
+        .filter_entry(move |e| {
             if e.depth() == 0 {
                 return true;
             }
+            let is_dir = e.file_type().is_some_and(|t| t.is_dir());
             let n = e.file_name().to_string_lossy();
-            if n.starts_with('.') || (e.file_type().is_dir() && SKIP_DIRS.contains(&n.as_ref())) {
+            if is_dir && SKIP_DIRS.contains(&n.as_ref()) {
                 return false;
             }
-            if e.file_type().is_dir() && e.path().join(OUTPUT_MARKER).exists() {
+            if is_dir && e.path().join(OUTPUT_MARKER).exists() {
                 return false;
             }
-            skip.is_none_or(|s| e.path() != s)
+            skip.as_deref().is_none_or(|s| e.path() != s)
         })
+        .build();
+    Ok(walker
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
         .filter_map(|e| {
             let rel = e.path().strip_prefix(root).ok()?;
             Some(rel.to_string_lossy().replace('\\', "/"))
         })
-        .collect()
+        .collect())
 }
 
 fn read_lossy(p: &Path) -> String {
@@ -279,12 +321,12 @@ fn read_lossy(p: &Path) -> String {
 }
 
 /// Build the site model from a directory, or by crawling links from a single file.
-fn load_site(input: &Path, skip: Option<&Path>) -> Result<Site, String> {
+fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     let input = input
         .canonicalize()
         .map_err(|e| format!("{}: {e}", input.display()))?;
     let (root, keys, start) = if input.is_dir() {
-        let keys = scan_dir(&input, skip);
+        let keys = scan_dir(&input, scan)?;
         (input, keys, None)
     } else {
         // Crawl from the filesystem root so links may go above the file's folder,
@@ -849,7 +891,7 @@ impl Ctx<'_> {
                     return Some(format!("data:{};base64,{b64}", mime_of(&key)));
                 }
                 if !is_dir && !site.entries.contains_key(&key) {
-                    self.warn(format!("{url}: target is not part of the site"));
+                    self.warn(format!("{url}: target is excluded from the site"));
                     return None;
                 }
                 let h = self.href(&key, is_dir, frag.as_deref());
@@ -1287,40 +1329,40 @@ fn json_str(s: &str) -> String {
 
 // ---------------------------------------------------------------- serve
 
-fn fingerprint(input: &Path, skip: Option<&Path>) -> (usize, SystemTime) {
+/// Cheap change detection for --serve: file count and newest mtime, including
+/// the ignore files (which the scan itself skips as hidden).
+fn fingerprint(input: &Path, scan: &ScanOpts) -> (usize, SystemTime) {
     let mtime = |p: &Path| {
         fs::metadata(p)
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH)
     };
-    if input.is_file() {
-        let dir = input.parent().unwrap();
-        let files = scan_dir(dir, skip);
-        let newest = files
-            .iter()
-            .map(|k| mtime(&dir.join(k)))
-            .max()
-            .unwrap_or(SystemTime::UNIX_EPOCH);
-        return (files.len(), newest);
-    }
-    let files = scan_dir(input, skip);
+    let dir = if input.is_file() {
+        input.parent().unwrap()
+    } else {
+        input
+    };
+    let files = scan_dir(dir, scan).unwrap_or_default();
     let newest = files
         .iter()
-        .map(|k| mtime(&input.join(k)))
+        .map(|k| dir.join(k))
+        .chain([dir.join(IGNORE_FILE), dir.join(".gitignore")])
+        .map(|p| mtime(&p))
         .max()
         .unwrap_or(SystemTime::UNIX_EPOCH);
     (files.len(), newest)
 }
 
-fn serve(input: PathBuf, port: u16, opts: BuildOpts) -> Result<(), String> {
+fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(), String> {
     let tmp = std::env::temp_dir().join(format!("webolator-{}", std::process::id()));
     let watch_input = input.clone();
     let css_path = opts.css.clone();
+    let watch_scan = scan.clone();
     let rebuild = {
         let tmp = tmp.clone();
         move || -> Result<(), String> {
             let _ = fs::remove_dir_all(&tmp);
-            let site = load_site(&input, None)?;
+            let site = load_site(&input, &scan)?;
             build_static(&site, &tmp, &opts)?;
             Ok(())
         }
@@ -1335,7 +1377,7 @@ fn serve(input: PathBuf, port: u16, opts: BuildOpts) -> Result<(), String> {
             let css_mtime = css
                 .as_ref()
                 .and_then(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
-            (fingerprint(&input, None), css_mtime)
+            (fingerprint(&input, &watch_scan), css_mtime)
         };
         std::thread::spawn(move || {
             let mut last = state();
@@ -1403,11 +1445,16 @@ fn run() -> Result<(), String> {
         css: cli.css.clone(),
         live_reload: cli.serve,
     };
+    let mut scan = ScanOpts {
+        skip: None,
+        no_ignore: cli.no_ignore,
+        exclude: cli.exclude.clone(),
+    };
     if cli.serve {
-        return serve(cli.input, cli.port, opts);
+        return serve(cli.input, cli.port, opts, scan);
     }
     if cli.single {
-        let site = load_site(&cli.input, None)?;
+        let site = load_site(&cli.input, &scan)?;
         let out = cli.out.unwrap_or_else(|| {
             let name = cli
                 .input
@@ -1423,7 +1470,8 @@ fn run() -> Result<(), String> {
         let out = cli.out.unwrap_or_else(|| PathBuf::from("site"));
         fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = out.canonicalize().map_err(|e| e.to_string())?;
-        let site = load_site(&cli.input, Some(&out))?;
+        scan.skip = Some(out.clone());
+        let site = load_site(&cli.input, &scan)?;
         let n = build_static(&site, &out, &opts)?;
         eprintln!(
             "wrote {n} file{} to {}",

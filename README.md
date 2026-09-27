@@ -73,6 +73,7 @@ cargo run -- examples/demo --serve
 | `foo.md` | `foo.html` (or `foo.md.html` if a raw `foo.html` already exists) |
 | any other file | copied as is |
 | hidden files and folders, `node_modules`, `target`, `venv` | skipped |
+| anything in `.gitignore`, `.webolatorignore` or `--exclude` | skipped (`--no-ignore` turns off the `.gitignore` part) |
 
 Number prefixes like `01-usage.md` or `02-guides/` set the sidebar order. They don't appear in labels and are removed from URLs, so `02-guides/01-setup.md` becomes `guides/setup.html`.
 

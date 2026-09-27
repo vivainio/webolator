@@ -29,6 +29,7 @@ flowchart LR
 - **Sibling files** (raw HTML, text, PDFs, images) are kept and linked.
 - **[Single-file output](03-features/03-single-file.md)** puts a whole folder of docs into one `.html` file.
 - **Live reload** with `--serve`.
+- **[Leaves out junk](01-usage.md#leaving-files-out)**: `.gitignore` is honored, and `.webolatorignore` and `--exclude` cover the rest.
 - **[Custom CSS](03-features/04-styling.md)**: drop a `webolator.css` into the folder, or pass `--css`.
 
 ## See it in action
