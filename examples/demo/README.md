@@ -11,7 +11,7 @@ Jump [down](#flow).
 
 ```mermaid
 graph LR
-  A[Write md] --> B{mdsite}
+  A[Write md] --> B{webolator}
   B --> C[static site]
   B --> D[single file]
 ```

@@ -1,10 +1,10 @@
 [package]
-name = "mdsite"
+name = "webolator"
 version = "0.1.0"
 edition = "2024"
 description = "Zero-config markdown to website: folder or single file, mermaid, syntax highlighting, single-file output"
 license = "MIT"
-repository = "https://github.com/vivainio/mdsite"
+repository = "https://github.com/vivainio/webolator"
 readme = "README.md"
 keywords = ["markdown", "static-site", "mermaid", "documentation"]
 categories = ["command-line-utilities"]

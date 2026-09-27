@@ -1,6 +1,6 @@
 
 (() => {
-  const assets = JSON.parse(document.getElementById('mdsite-assets').textContent);
+  const assets = JSON.parse(document.getElementById('webolator-assets').textContent);
   const sections = [...document.querySelectorAll('section.page')];
   const blobUrls = {};
 
@@ -26,14 +26,14 @@
   function show() {
     const id = decodeURIComponent(location.hash.slice(1));
     let target = id && document.getElementById(id);
-    if (!target || !target.closest('section.page')) target = document.getElementById(MDSITE_FIRST);
+    if (!target || !target.closest('section.page')) target = document.getElementById(WEBOLATOR_FIRST);
     const section = target.closest('section.page');
     for (const s of sections) s.hidden = s !== section;
     document.title = section.dataset.title;
     for (const a of document.querySelectorAll('nav.side a')) {
       a.classList.toggle('active', a.getAttribute('href') === '#' + section.id);
     }
-    if (window.mdsiteMermaid) window.mdsiteMermaid(section);
+    if (window.webolatorMermaid) window.webolatorMermaid(section);
     if (target !== section) target.scrollIntoView();
     else window.scrollTo(0, 0);
   }

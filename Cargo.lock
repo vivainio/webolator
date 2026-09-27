@@ -314,18 +314,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "mdsite"
-version = "0.1.0"
-dependencies = [
- "base64",
- "clap",
- "comrak",
- "syntect",
- "tiny_http",
- "walkdir",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -677,6 +665,18 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
+]
+
+[[package]]
+name = "webolator"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "clap",
+ "comrak",
+ "syntect",
+ "tiny_http",
+ "walkdir",
 ]
 
 [[package]]

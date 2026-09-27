@@ -1,4 +1,4 @@
-# mdsite
+# webolator
 
 Turn a folder of markdown, or a single `.md` file, into a browsable website. No config file, no index file, no `SUMMARY.md`.
 
@@ -15,17 +15,17 @@ Turn a folder of markdown, or a single `.md` file, into a browsable website. No 
 ## Install
 
 ```bash
-cargo install --git https://github.com/vivainio/mdsite
+cargo install --git https://github.com/vivainio/webolator
 ```
 
 ## Usage
 
 ```bash
-mdsite docs/                     # static site in ./site
-mdsite docs/ -o public           # ...or somewhere else
-mdsite docs/ --single            # one self-contained docs.html
-mdsite notes.md --single         # a single file, plus anything it links to
-mdsite docs/ --serve             # http://127.0.0.1:8000 with live reload
+webolator docs/                     # static site in ./site
+webolator docs/ -o public           # ...or somewhere else
+webolator docs/ --single            # one self-contained docs.html
+webolator notes.md --single         # a single file, plus anything it links to
+webolator docs/ --serve             # http://127.0.0.1:8000 with live reload
 ```
 
 Try it on the bundled demo:
@@ -44,7 +44,7 @@ cargo run -- examples/demo --serve
 | any other file | copied as is |
 | hidden files and folders, `node_modules`, `target`, `venv` | skipped |
 
-If you pass a **single file**, mdsite follows its local links, including links to parent folders. The site then contains that file, which becomes the home page, plus everything reachable from it.
+If you pass a **single file**, webolator follows its local links, including links to parent folders. The site then contains that file, which becomes the home page, plus everything reachable from it.
 
 In **`--single` mode**, each page becomes a section with hash routing, so the back and forward buttons and deep links like `docs.html#p-guide-install--setup` work. Images are inlined. Linked HTML files are shown in an iframe and text files as preformatted text, and PDFs and other files open from embedded blobs.
 
@@ -53,7 +53,7 @@ In **`--single` mode**, each page becomes a section with hash routing, so the ba
 By default mermaid.js is loaded from the jsDelivr CDN, and only on pages that contain a diagram. To work fully offline, pass a local copy:
 
 ```bash
-mdsite docs/ --single --mermaid-js mermaid.min.js
+webolator docs/ --single --mermaid-js mermaid.min.js
 ```
 
-In static mode the file is copied to `_mdsite/`. In `--single` mode it is inlined.
+In static mode the file is copied to `_webolator/`. In `--single` mode it is inlined.
