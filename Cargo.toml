@@ -1,0 +1,22 @@
+[package]
+name = "mdsite"
+version = "0.1.0"
+edition = "2024"
+description = "Zero-config markdown to website: folder or single file, mermaid, syntax highlighting, single-file output"
+license = "MIT"
+repository = "https://github.com/vivainio/mdsite"
+readme = "README.md"
+keywords = ["markdown", "static-site", "mermaid", "documentation"]
+categories = ["command-line-utilities"]
+
+[profile.release]
+strip = true
+lto = true
+
+[dependencies]
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive"] }
+comrak = { version = "0.55.0", default-features = false, features = ["syntect-fancy"] }
+syntect = { version = "5.3.0", default-features = false, features = ["default-themes", "default-syntaxes", "html", "regex-fancy"] }
+tiny_http = "0.12.0"
+walkdir = "2.5.0"
