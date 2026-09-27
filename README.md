@@ -11,6 +11,7 @@ Turn a folder of markdown, or a single `.md` file, into a browsable website. No 
 - **Sibling files are kept.** Raw `.html`, `.txt`/`.log`/code files, PDFs and images are copied and linked. HTML, text and PDF files also appear in the sidebar.
 - **`--single`** writes one self-contained `.html` with everything embedded (images, text files, HTML files, PDFs), which is easy to email or attach.
 - **`--serve`** runs a local preview with live reload.
+- **Custom CSS.** A `webolator.css` in the docs root is applied automatically, or you can pass `--css file.css`. Colors are CSS variables, so a theme can be a few lines. See [styling](https://vivainio.github.io/webolator/features/styling.html).
 - GitHub-flavored markdown: tables, task lists, footnotes, strikethrough, autolinks and `> [!NOTE]` alerts.
 - Light and dark mode follow the OS setting.
 

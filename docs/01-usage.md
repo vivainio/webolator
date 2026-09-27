@@ -12,6 +12,7 @@ Options:
       --serve                    Serve locally with live reload instead of writing output
       --port <PORT>              [default: 8000]
       --mermaid-js <MERMAID_JS>  Use this local mermaid.min.js (inlined/copied) instead of the CDN
+      --css <CSS>                Extra stylesheet applied after the built-in styles (in addition to <root>/webolator.css)
 ```
 
 ## A folder
