@@ -29,6 +29,7 @@ flowchart LR
 - **Sibling files** (raw HTML, text, PDFs, images) are kept and linked.
 - **[Single-file output](03-features/03-single-file.md)** puts a whole folder of docs into one `.html` file.
 - **Live reload** with `--serve`.
+- **[File lists](01-usage.md#folders-of-files)**: `--files assets/` lists a folder of downloads instead of rendering it.
 - **[Syntax reference](syntax.md)**: every supported markdown form, with examples.
 - **[Reading comfort](03-features/06-reading.md)**: an "On this page" sidebar, previous/next links, "last updated" and "Edit this page" from git, a light/dark toggle, copy buttons, image zoom and a phone menu.
 - **[Writing extras](03-features/05-writing.md)**: math, emoji, `[[wikilinks]]` and optional front matter.

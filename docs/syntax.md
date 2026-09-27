@@ -135,3 +135,5 @@ These are the only fields, and any others are ignored. See [Front matter](03-fea
 | `webolator.css` (in the root) | [custom styles](03-features/04-styling.md), applied automatically |
 | `.webolatorignore` | [files to leave out](01-usage.md#leaving-files-out), in gitignore syntax |
 | `.gitignore`, `.ignore` | honored by default, `--no-ignore` turns them off |
+
+To show a folder as a plain file list instead, see [`--files`](01-usage.md#folders-of-files).

@@ -15,6 +15,7 @@ Turn a folder of markdown, or a single `.md` file, into a browsable website. No 
 - **Writing extras:** `$math$` (KaTeX), `:emoji:`, `[[wikilinks]]`, and optional front matter (`title`, `order`, `hidden`).
   See the [syntax reference](https://vivainio.github.io/webolator/syntax.html) for every supported form.
 - **`--check`** fails the build on broken links, for CI.
+- **`--files assets/`** shows a folder as a plain file list (name, size, date) instead of rendering it. Useful for downloads and attachments.
 - **Custom CSS.** A `webolator.css` in the docs root is applied automatically, or you can pass `--css file.css`. Colors are CSS variables, so a theme can be a few lines. See [styling](https://vivainio.github.io/webolator/features/styling.html).
 - GitHub-flavored markdown: tables, task lists, footnotes, strikethrough, autolinks and `> [!NOTE]` alerts.
 - Light and dark mode follow the OS setting.

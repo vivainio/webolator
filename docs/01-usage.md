@@ -19,6 +19,7 @@ Options:
       --no-ignore                Include files that .gitignore / .ignore would leave out (.webolatorignore still applies)
       --no-git                   Don't add "last updated" dates and "edit this page" links from git
       --check                    Fail (exit code 1) if there are broken or excluded links
+      --files <DIR>              Show this folder as a file list instead of rendering its contents (repeatable)
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -40,6 +41,24 @@ Every markdown file becomes a page. Each folder gets an `index.html`:
 | any other file | copied as is |
 | hidden files and folders, `node_modules`, `target`, `venv` | skipped |
 | anything matched by an ignore rule | skipped, see [Leaving files out](#leaving-files-out) |
+
+## Folders of files
+
+Some folders hold downloads, attachments or assets rather than documentation. Pass `--files` to list such a folder's contents instead of rendering them:
+
+```bash
+webolator docs/ --files assets --files downloads/archive
+```
+
+- **Nothing inside is rendered.** Markdown files are copied as `.md`, HTML files are served as is, and everything else is copied.
+- **The folder and every folder inside it get a file list** with each file's name, size and last-changed date. The date comes from git when available, otherwise from the file's modification time. Each subfolder's list has a `../` link back up.
+- **The sidebar shows the folder once,** tagged *files* and linking to the list, rather than every file in it.
+- **Links from your pages into the folder** (`[installer](assets/setup.zip)`, or `[assets](assets/)` for the list) work as usual.
+- **File names are kept exactly,** including `01-` prefixes, which only order the sidebar outside `--files` folders.
+- **If the folder has its own `index.html`,** that file is kept and the list is written to `_files.html` instead.
+- **With `--single`,** every file is embedded, so downloads work offline. The output grows by the total size of the files.
+
+The path is relative to the input folder, or to the current directory if it doesn't exist there. `--files .` turns the whole input into a file list. `--files` also works with a single-file input: the folder is included in full, whether or not anything links to it.
 
 ## Leaving files out
 

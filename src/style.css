@@ -134,6 +134,14 @@ li + li { margin-top: .25em; }
 li > input[type=checkbox] { margin: 0 .3em 0 -1.3em; }
 li:has(> input[type=checkbox]) { list-style: none; }
 ul.listing li { list-style: "📄  "; }
+.files-summary { color: var(--muted); font-size: 14px; }
+table.files { display: table; width: 100%; font-size: 14px; }
+table.files th { text-align: left; }
+table.files td:nth-child(2), table.files th:nth-child(2) { text-align: right; white-space: nowrap; }
+table.files td:nth-child(3), table.files th:nth-child(3) { white-space: nowrap; color: var(--muted); }
+table.files td:first-child { word-break: break-all; }
+table.files tr:nth-child(2n) { background: none; }
+table.files tbody tr:hover { background: var(--hover); }
 .footnotes { font-size: 90%; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1em; }
 .markdown-alert { padding: .5em 1em; margin-bottom: 1em; border-left: .25em solid var(--note); }
 .markdown-alert > :last-child { margin-bottom: 0; }

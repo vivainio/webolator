@@ -103,6 +103,9 @@ struct Cli {
     /// Fail (exit code 1) if there are broken or excluded links
     #[arg(long)]
     check: bool,
+    /// Show this folder as a file list instead of rendering its contents (repeatable)
+    #[arg(long, value_name = "DIR")]
+    files: Vec<PathBuf>,
 }
 
 static WARNINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -134,6 +137,8 @@ struct Entry {
 enum DirIndex {
     Entry(String),
     Generated,
+    /// A --files folder (or a folder inside one): a file list at this output path.
+    Files(String),
 }
 
 struct Site {
@@ -223,6 +228,7 @@ impl Site {
         match self.dirs.get(dir)? {
             DirIndex::Entry(k) => self.out.get(k).cloned(),
             DirIndex::Generated => Some(join_key(&clean_dir(dir), "index.html")),
+            DirIndex::Files(out) => Some(out.clone()),
         }
     }
 
@@ -286,6 +292,8 @@ impl Site {
                     out.push(Doc::Entry(k.clone()))
                 }
                 Some(DirIndex::Generated) => out.push(Doc::Listing(dir.to_string())),
+                // A file list is one stop in the reading order; its contents aren't pages.
+                Some(DirIndex::Files(_)) => return out.push(Doc::Listing(dir.to_string())),
                 _ => {}
             }
             let idx = site.index_key(dir);
@@ -344,6 +352,8 @@ struct ScanOpts {
     exclude: Vec<String>,
     /// Look up "last updated" dates and edit links in git.
     git: bool,
+    /// Folders (from --files) whose contents are listed, not rendered.
+    files: Vec<PathBuf>,
 }
 
 /// Name of the gitignore-syntax file listing what to leave out of the site.
@@ -409,6 +419,28 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     let input = input
         .canonicalize()
         .map_err(|e| format!("{}: {e}", input.display()))?;
+    // --files folders: relative to the input folder (or the input file's folder),
+    // falling back to the current directory.
+    let base = if input.is_dir() {
+        input.clone()
+    } else {
+        input.parent().unwrap().to_path_buf()
+    };
+    let files_abs = scan
+        .files
+        .iter()
+        .map(|p| {
+            let cand = if base.join(p).is_dir() {
+                base.join(p)
+            } else {
+                p.clone()
+            };
+            cand.canonicalize()
+                .ok()
+                .filter(|c| c.is_dir())
+                .ok_or_else(|| format!("--files {}: not a folder", p.display()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let (root, keys, start) = if input.is_dir() {
         let keys = scan_dir(&input, scan)?;
         (input, keys, None)
@@ -421,9 +453,20 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        let found = crawl(&fs_root, &start_abs);
+        let mut found = crawl(&fs_root, &start_abs);
+        // --files folders are included whole, whether or not anything links to them.
+        let mut files_rel = Vec::new();
+        for fd in &files_abs {
+            let rel = fd
+                .strip_prefix(&fs_root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            found.extend(scan_dir(fd, scan)?.into_iter().map(|k| join_key(&rel, &k)));
+            files_rel.push(join_key(&rel, "x"));
+        }
         let mut common: Vec<&str> = parent_dir(&start_abs).split('/').collect();
-        for k in &found {
+        for k in found.iter().chain(&files_rel) {
             let d: Vec<&str> = parent_dir(k).split('/').collect();
             let n = common.iter().zip(&d).take_while(|(a, b)| a == b).count();
             common.truncate(n);
@@ -439,10 +482,32 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
         (fs_root.join(&prefix), keys, Some(strip(&start_abs)))
     };
 
+    let files_dirs = files_abs
+        .iter()
+        .map(|fd| {
+            fd.strip_prefix(&root)
+                .map(|r| r.to_string_lossy().replace('\\', "/"))
+                .map_err(|_| format!("--files {}: outside the site folder", fd.display()))
+        })
+        .collect::<Result<Vec<String>, _>>()?;
+    let in_files_dir = |k: &str| {
+        files_dirs
+            .iter()
+            .any(|fd| fd.is_empty() || k == fd || k.starts_with(&format!("{fd}/")))
+    };
+
     let mut entries = BTreeMap::new();
     for k in keys.into_iter().filter(|k| k != CUSTOM_CSS) {
         let kind = kind_of(&k);
-        let entry = if kind == Kind::Page {
+        let entry = if in_files_dir(&k) {
+            // Copied as is and only shown in the folder's file list.
+            Entry {
+                kind: Kind::Other,
+                title: file_name(&k).to_string(),
+                order: None,
+                hidden: true,
+            }
+        } else if kind == Kind::Page {
             let m = page_meta(&read_lossy(&root.join(&k)));
             Entry {
                 kind,
@@ -462,7 +527,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
         };
         entries.insert(k, entry);
     }
-    if !entries.values().any(|e| e.kind == Kind::Page) {
+    if files_dirs.is_empty() && !entries.values().any(|e| e.kind == Kind::Page) {
         return Err(format!("no markdown files found in {}", root.display()));
     }
 
@@ -480,7 +545,35 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
             d = parent_dir(d);
         }
     }
-    let dir_names: Vec<String> = dirs.keys().cloned().collect();
+    // --files folders and every folder inside them get a file list; the folders
+    // above them get normal index pages.
+    let mut files_listing_dirs = BTreeSet::new();
+    for fd in &files_dirs {
+        files_listing_dirs.insert(fd.clone());
+        for k in entries.keys().filter(|k| in_files_dir(k)) {
+            let mut d = parent_dir(k);
+            while d.len() > fd.len() {
+                files_listing_dirs.insert(d.to_string());
+                d = parent_dir(d);
+            }
+        }
+        let mut d = parent_dir(fd);
+        while !fd.is_empty() {
+            dirs.entry(d.to_string()).or_insert(DirIndex::Generated);
+            if d.is_empty() {
+                break;
+            }
+            d = parent_dir(d);
+        }
+    }
+    for d in &files_listing_dirs {
+        dirs.insert(d.clone(), DirIndex::Files(String::new()));
+    }
+    let dir_names: Vec<String> = dirs
+        .iter()
+        .filter(|(_, i)| !matches!(i, DirIndex::Files(_)))
+        .map(|(d, _)| d.clone())
+        .collect();
     for d in dir_names {
         let find = |pred: &dyn Fn(&str, Kind) -> bool| {
             entries
@@ -504,16 +597,33 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     let mut taken: HashSet<String> = entries
         .iter()
         .filter(|(_, e)| e.kind != Kind::Page)
-        .map(|(k, _)| join_key(&clean_dir(parent_dir(k)), file_name(k)))
+        .map(|(k, _)| join_key(&raw_aware_dir(&files_dirs, parent_dir(k)), file_name(k)))
         .collect();
-    for (d, idx) in &dirs {
-        if matches!(idx, DirIndex::Generated) {
-            taken.insert(join_key(&clean_dir(d), "index.html"));
+    for (d, idx) in dirs.iter_mut() {
+        match idx {
+            DirIndex::Generated => {
+                taken.insert(join_key(&clean_dir(d), "index.html"));
+            }
+            DirIndex::Files(out) => {
+                // Don't overwrite an index.html that is itself one of the listed files.
+                let dir_out = raw_aware_dir(&files_dirs, d);
+                let want = join_key(&dir_out, "index.html");
+                *out = if taken.contains(&want) {
+                    join_key(&dir_out, "_files.html")
+                } else {
+                    want
+                };
+                taken.insert(out.clone());
+            }
+            DirIndex::Entry(_) => {}
         }
     }
     for (k, e) in &entries {
         if e.kind != Kind::Page {
-            out.insert(k.clone(), join_key(&clean_dir(parent_dir(k)), file_name(k)));
+            out.insert(
+                k.clone(),
+                join_key(&raw_aware_dir(&files_dirs, parent_dir(k)), file_name(k)),
+            );
         }
     }
     // Page -> directory it is the index of. BTreeMap order puts "" first, so the
@@ -574,6 +684,22 @@ fn order_prefix(name: &str) -> (Option<u64>, &str) {
 
 fn display_name(name: &str) -> &str {
     order_prefix(name).1
+}
+
+/// Output directory for a source directory, like clean_dir, except that inside a
+/// --files folder names are kept exactly as they are.
+fn raw_aware_dir(files_dirs: &[String], dir: &str) -> String {
+    for fd in files_dirs {
+        if fd.is_empty() {
+            return dir.to_string();
+        }
+        if let Some(rest) = dir.strip_prefix(fd.as_str())
+            && (rest.is_empty() || rest.starts_with('/'))
+        {
+            return format!("{}{rest}", clean_dir(fd));
+        }
+    }
+    clean_dir(dir)
 }
 
 /// Output directory for a source directory: ordering prefixes removed from every component.
@@ -1342,6 +1468,111 @@ impl Ctx<'_> {
     }
 }
 
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut v = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    format!("{v:.1} {}", UNITS[unit])
+}
+
+/// YYYY-MM-DD (UTC) for a timestamp.
+fn ymd(t: SystemTime) -> String {
+    let days = t
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400) as i64;
+    // Civil-from-days (Howard Hinnant).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// File list for a --files folder: subfolders, then files with size and date.
+fn render_files(ctx: &Ctx, dir: &str) -> String {
+    let site = ctx.site;
+    let by_name = |a: &&String, b: &&String| {
+        file_name(a)
+            .to_lowercase()
+            .cmp(&file_name(b).to_lowercase())
+    };
+    let mut subdirs: Vec<&String> = site
+        .dirs
+        .keys()
+        .filter(|d| !d.is_empty() && parent_dir(d) == dir)
+        .collect();
+    subdirs.sort_by(by_name);
+    let mut files: Vec<&String> = site
+        .entries
+        .keys()
+        .filter(|k| parent_dir(k) == dir)
+        .collect();
+    files.sort_by(by_name);
+
+    let mut rows = String::new();
+    let parent = parent_dir(dir);
+    if !dir.is_empty()
+        && matches!(site.dirs.get(parent), Some(DirIndex::Files(_)))
+        && let Some(href) = ctx.href(parent, true, None)
+    {
+        rows += &format!(
+            "<tr><td><a href=\"{}\">../</a></td><td></td><td></td></tr>\n",
+            esc(&href)
+        );
+    }
+    for d in &subdirs {
+        if let Some(href) = ctx.href(d, true, None) {
+            rows += &format!(
+                "<tr><td><a href=\"{}\">{}/</a></td><td></td><td></td></tr>\n",
+                esc(&href),
+                esc(file_name(d))
+            );
+        }
+    }
+    let mut total = 0;
+    for k in &files {
+        let meta = fs::metadata(site.root.join(k)).ok();
+        let size = meta.as_ref().map_or(0, |m| m.len());
+        total += size;
+        let date = match site.git_meta(k).0 {
+            Some(d) => d.to_string(),
+            None => meta
+                .and_then(|m| m.modified().ok())
+                .map(ymd)
+                .unwrap_or_default(),
+        };
+        let href = ctx.href(k, false, None).unwrap_or_default();
+        rows += &format!(
+            "<tr><td><a href=\"{}\">{}</a></td><td>{}</td><td>{date}</td></tr>\n",
+            esc(&href),
+            esc(file_name(k)),
+            human_size(size)
+        );
+    }
+    let summary = match files.len() {
+        0 => String::new(),
+        1 => format!("1 file, {}", human_size(total)),
+        n => format!("{n} files, {}", human_size(total)),
+    };
+    format!(
+        "<h1>{}</h1>\n<p class=\"files-summary\">{summary}</p>\n\
+         <table class=\"files\">\n<thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>\n<tbody>\n{rows}</tbody>\n</table>\n",
+        esc(&site.dir_title(dir))
+    )
+}
+
 fn tag(key: &str, kind: Kind) -> String {
     if kind == Kind::Page {
         String::new()
@@ -1380,7 +1611,13 @@ fn nav_dir(site: &Site, dir: &str, link: &dyn Fn(&str, bool, &str, &str) -> Stri
     let idx = site.index_key(dir);
     let mut h = String::from("<ul>\n");
     for (k, is_dir) in site.children(dir) {
-        if is_dir {
+        if is_dir && matches!(site.dirs.get(&k), Some(DirIndex::Files(_))) {
+            let tag = " <span class=\"tag\">files</span>";
+            h += &format!(
+                "<li>{}</li>\n",
+                link(&k, true, display_name(file_name(&k)), tag)
+            );
+        } else if is_dir {
             h += &format!(
                 "<li><details open><summary>{}</summary>\n{}</details></li>\n",
                 link(&k, true, display_name(file_name(&k)), ""),
@@ -1578,21 +1815,33 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         }
     }
     for (d, idx) in &site.dirs {
-        if matches!(idx, DirIndex::Generated) {
-            let out = join_key(&clean_dir(d), "index.html");
-            render(
-                &out,
-                &out,
-                &site.dir_title(d),
-                Doc::Listing(d.clone()),
-                &|ctx| render_listing(ctx, d),
-            )?;
+        match idx {
+            DirIndex::Generated => {
+                let out = join_key(&clean_dir(d), "index.html");
+                render(
+                    &out,
+                    &out,
+                    &site.dir_title(d),
+                    Doc::Listing(d.clone()),
+                    &|ctx| render_listing(ctx, d),
+                )?;
+            }
+            DirIndex::Files(out) => {
+                render(
+                    out,
+                    out,
+                    &site.dir_title(d),
+                    Doc::Listing(d.clone()),
+                    &|ctx| render_files(ctx, d),
+                )?;
+            }
+            DirIndex::Entry(_) => {}
         }
     }
     let generated = site
         .dirs
         .values()
-        .filter(|i| matches!(i, DirIndex::Generated))
+        .filter(|i| !matches!(i, DirIndex::Entry(_)))
         .count();
     Ok(site.entries.len() + generated)
 }
@@ -1629,15 +1878,13 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
 
     let mut body = String::new();
     for (d, idx) in &site.dirs {
-        if matches!(idx, DirIndex::Generated) {
-            let id = site.dir_id(d);
-            body += &section(
-                &id,
-                &site.dir_title(d),
-                Doc::Listing(d.clone()),
-                &render_listing(&ctx_for(id.clone()), d),
-            );
-        }
+        let id = site.dir_id(d);
+        let inner = match idx {
+            DirIndex::Generated => render_listing(&ctx_for(id.clone()), d),
+            DirIndex::Files(_) => render_files(&ctx_for(id.clone()), d),
+            DirIndex::Entry(_) => continue,
+        };
+        body += &section(&id, &site.dir_title(d), Doc::Listing(d.clone()), &inner);
     }
     for (k, e) in &site.entries {
         let id = site.entry_id(k);
@@ -1850,6 +2097,7 @@ fn run() -> Result<(), String> {
         no_ignore: cli.no_ignore,
         exclude: cli.exclude.clone(),
         git: !cli.no_git,
+        files: cli.files.clone(),
     };
     if cli.serve {
         return serve(cli.input, cli.port, opts, scan);
