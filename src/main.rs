@@ -67,7 +67,10 @@ const CUSTOM_CSS: &str = "webolator.css";
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "__pycache__", "venv"];
 
 #[derive(Parser)]
-#[command(about = "Render markdown files into a zero-config website (with mermaid)")]
+#[command(
+    version,
+    about = "Render markdown files into a zero-config website (with mermaid)"
+)]
 struct Cli {
     /// Markdown file or directory
     input: PathBuf,

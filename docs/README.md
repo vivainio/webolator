@@ -38,6 +38,14 @@ flowchart LR
 
 ## Install
 
+For a one-off run, you don't need to install anything:
+
+```bash
+uvx webolator notes.md --single
+```
+
+To keep it around:
+
 ```bash
 uv tool install webolator
 ```
