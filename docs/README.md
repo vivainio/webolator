@@ -42,4 +42,6 @@ flowchart LR
 uv tool install webolator
 ```
 
-Pre-built binaries are also on the [releases page](https://github.com/vivainio/webolator/releases). Continue with [Usage](01-usage.md).
+For every install option (uv, pre-built binaries, or building from source), see the [installation instructions in the README](https://github.com/vivainio/webolator#installation).
+
+Next: [Usage](01-usage.md).

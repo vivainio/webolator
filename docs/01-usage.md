@@ -1,5 +1,7 @@
 # Usage
 
+If webolator isn't installed yet, see the [installation instructions](https://github.com/vivainio/webolator#installation).
+
 ```text
 webolator [OPTIONS] <INPUT>
 
