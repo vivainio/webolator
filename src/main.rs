@@ -106,6 +106,48 @@ struct Cli {
     /// Show this folder as a file list instead of rendering its contents (repeatable)
     #[arg(long, value_name = "DIR")]
     files: Vec<PathBuf>,
+    /// Publish files larger than 10 MB instead of failing
+    #[arg(long)]
+    allow_large: bool,
+}
+
+/// Files above this size fail the build unless --allow-large is given.
+const LARGE_FILE: u64 = 10 * 1024 * 1024;
+
+/// Refuses to publish files over LARGE_FILE, listing them.
+fn check_large(site: &Site) -> Result<(), String> {
+    let large: Vec<(&String, u64)> = site
+        .entries
+        .keys()
+        .filter_map(|k| {
+            let size = fs::metadata(site.root.join(k)).ok()?.len();
+            (size > LARGE_FILE).then_some((k, size))
+        })
+        .collect();
+    if large.is_empty() {
+        return Ok(());
+    }
+    let list: Vec<String> = large
+        .iter()
+        .map(|(k, size)| format!("  {k} ({})", human_size(*size)))
+        .collect();
+    // Suggest excluding each containing folder, or the file itself at the root.
+    let excludes: BTreeSet<String> = large
+        .iter()
+        .map(|(k, _)| match parent_dir(k) {
+            "" => format!("--exclude '/{k}'"),
+            d => format!("--exclude '/{d}/'"),
+        })
+        .collect();
+    Err(format!(
+        "{} file{} over {} would be published:\n{}\nLeave {} out with {}\n(or in .webolatorignore), or pass --allow-large",
+        large.len(),
+        if large.len() == 1 { "" } else { "s" },
+        human_size(LARGE_FILE),
+        list.join("\n"),
+        if large.len() == 1 { "it" } else { "them" },
+        excludes.into_iter().collect::<Vec<_>>().join(" ")
+    ))
 }
 
 static WARNINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -2104,6 +2146,9 @@ fn run() -> Result<(), String> {
     }
     if cli.single {
         let site = load_site(&cli.input, &scan)?;
+        if !cli.allow_large {
+            check_large(&site)?;
+        }
         let out = cli.out.unwrap_or_else(|| {
             let name = cli
                 .input
@@ -2121,6 +2166,9 @@ fn run() -> Result<(), String> {
         let out = out.canonicalize().map_err(|e| e.to_string())?;
         scan.skip = Some(out.clone());
         let site = load_site(&cli.input, &scan)?;
+        if !cli.allow_large {
+            check_large(&site)?;
+        }
         let n = build_static(&site, &out, &opts)?;
         eprintln!(
             "wrote {n} file{} to {}",

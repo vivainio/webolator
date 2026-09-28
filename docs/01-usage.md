@@ -20,6 +20,7 @@ Options:
       --no-git                   Don't add "last updated" dates and "edit this page" links from git
       --check                    Fail (exit code 1) if there are broken or excluded links
       --files <DIR>              Show this folder as a file list instead of rendering its contents (repeatable)
+      --allow-large              Publish files larger than 10 MB instead of failing
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -89,6 +90,19 @@ warning: README.md: drafts/plan.md: target is excluded from the site
 With `--serve`, excluded files aren't watched, and editing `.webolatorignore` or `.gitignore` rebuilds the site.
 
 When the input is a single file, the site contains only that file and what it links to, so the ignore rules aren't needed there and aren't applied.
+
+### Large files
+
+A build stops with an error if any file it would publish is larger than 10 MB, so a stray video or database dump doesn't end up on the site by accident:
+
+```text
+error: 1 file over 10.0 MB would be published:
+  media/demo.mp4 (48.2 MB)
+Leave it out with --exclude '/media/'
+(or in .webolatorignore), or pass --allow-large
+```
+
+The suggested `--exclude` leaves out the whole folder holding each large file (or just the file, if it's at the top level). Use it as is, put a narrower pattern in `.webolatorignore`, or pass `--allow-large` if it really belongs on the site. `--serve` doesn't check, since it only previews locally.
 
 ## Ordering
 
