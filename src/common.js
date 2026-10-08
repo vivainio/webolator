@@ -98,11 +98,14 @@
     const overlay = document.createElement('div');
     overlay.className = 'zoom';
     const big = document.createElement('img');
-    overlay.append(big);
+    const cap = document.createElement('div');
+    cap.className = 'zoom-caption';
+    overlay.append(big, cap);
     const show = () => {
       const cur = imgs[i];
       big.src = cur.dataset.full || cur.currentSrc || cur.src;
       big.alt = cur.alt;
+      cap.textContent = group ? (cur.closest('figure')?.querySelector('figcaption')?.textContent || cur.alt) : '';
     };
     const close = () => { overlay.remove(); removeEventListener('keydown', onKey); };
     const onKey = (k) => {
