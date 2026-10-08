@@ -489,7 +489,11 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
         .chain(&scan.gallery)
         .enumerate()
         .map(|(i, p)| {
-            let flag = if i < gallery_start { "--files" } else { "--gallery" };
+            let flag = if i < gallery_start {
+                "--files"
+            } else {
+                "--gallery"
+            };
             let cand = if base.join(p).is_dir() {
                 base.join(p)
             } else {
@@ -1592,12 +1596,18 @@ fn make_thumb(path: &Path) -> Result<Option<Thumb>, String> {
     let mut bytes = Vec::new();
     let ext = if small.color().has_alpha() {
         small
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .map_err(|e| e.to_string())?;
         "png"
     } else {
         let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 80);
-        small.to_rgb8().write_with_encoder(enc).map_err(|e| e.to_string())?;
+        small
+            .to_rgb8()
+            .write_with_encoder(enc)
+            .map_err(|e| e.to_string())?;
         "jpg"
     };
     Ok(((bytes.len() as u64) < orig).then_some(Thumb { bytes, ext }))
@@ -1630,7 +1640,10 @@ fn make_thumbs(site: &Site) -> HashMap<String, Thumb> {
                 })
             })
             .collect();
-        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
     });
     let mut thumbs = HashMap::new();
     for (k, r) in results {
@@ -1676,7 +1689,11 @@ fn render_gallery(ctx: &Ctx, images: &[&String]) -> String {
         let src = match (ctx.thumbs.get(k.as_str()), ctx.mode) {
             (Some(t), Mode::Single) => format!(
                 "data:{};base64,{}",
-                if t.ext == "png" { "image/png" } else { "image/jpeg" },
+                if t.ext == "png" {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                },
                 base64::engine::general_purpose::STANDARD.encode(&t.bytes)
             ),
             (Some(t), Mode::Static) => rel_href(&ctx.from_out, &thumb_out(site, k, t)),
