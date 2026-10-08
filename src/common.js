@@ -88,18 +88,29 @@
     update();
   }
 
-  // ---- image zoom
+  // ---- image zoom (gallery tiles: full image, arrow keys step through the folder)
   document.addEventListener('click', (e) => {
     const img = e.target.closest('article img');
     if (!img || img.closest('a')) return;
+    const group = img.closest('.gallery');
+    const imgs = group ? [...group.querySelectorAll('img')] : [img];
+    let i = imgs.indexOf(img);
     const overlay = document.createElement('div');
     overlay.className = 'zoom';
-    const big = img.cloneNode();
-    big.removeAttribute('width');
-    big.removeAttribute('height');
+    const big = document.createElement('img');
     overlay.append(big);
+    const show = () => {
+      const cur = imgs[i];
+      big.src = cur.dataset.full || cur.currentSrc || cur.src;
+      big.alt = cur.alt;
+    };
     const close = () => { overlay.remove(); removeEventListener('keydown', onKey); };
-    const onKey = (k) => { if (k.key === 'Escape') close(); };
+    const onKey = (k) => {
+      if (k.key === 'Escape') close();
+      else if (k.key === 'ArrowRight') { i = (i + 1) % imgs.length; show(); }
+      else if (k.key === 'ArrowLeft') { i = (i - 1 + imgs.length) % imgs.length; show(); }
+    };
+    show();
     overlay.addEventListener('click', close);
     addEventListener('keydown', onKey);
     document.body.append(overlay);

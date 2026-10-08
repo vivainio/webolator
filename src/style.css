@@ -105,6 +105,11 @@ article a img { cursor: pointer; }
 }
 .zoom img { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
 
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin: 1em 0; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid var(--border, #8884); border-radius: 4px; background: #8881; }
+.gallery figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .math-display { overflow-x: auto; overflow-y: hidden; margin: 0 0 1em; }
 article > :first-child { margin-top: 0; }
 h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.5em 0 .6em; font-weight: 600; position: relative; }

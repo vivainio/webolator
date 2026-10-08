@@ -106,6 +106,9 @@ struct Cli {
     /// Show this folder as a file list instead of rendering its contents (repeatable)
     #[arg(long, value_name = "DIR")]
     files: Vec<PathBuf>,
+    /// Show this folder as a thumbnail gallery of its images (repeatable)
+    #[arg(long, value_name = "DIR")]
+    gallery: Vec<PathBuf>,
     /// Publish files larger than 10 MB instead of failing
     #[arg(long)]
     allow_large: bool,
@@ -193,6 +196,8 @@ struct Site {
     /// Static output path of each entry.
     out: HashMap<String, String>,
     git: Option<GitInfo>,
+    /// --gallery folders, relative to root.
+    gallery: Vec<String>,
 }
 
 /// A page in reading order (sidebar order, depth first).
@@ -252,6 +257,13 @@ fn slug(s: &str) -> String {
 }
 
 impl Site {
+    /// Whether `dir` is a --gallery folder or inside one.
+    fn in_gallery(&self, dir: &str) -> bool {
+        self.gallery
+            .iter()
+            .any(|g| g.is_empty() || dir == g || dir.starts_with(&format!("{g}/")))
+    }
+
     fn nav_keys(&self) -> impl Iterator<Item = &String> {
         self.entries
             .iter()
@@ -396,6 +408,8 @@ struct ScanOpts {
     git: bool,
     /// Folders (from --files) whose contents are listed, not rendered.
     files: Vec<PathBuf>,
+    /// Folders (from --gallery): like --files, with a thumbnail grid of the images.
+    gallery: Vec<PathBuf>,
 }
 
 /// Name of the gitignore-syntax file listing what to leave out of the site.
@@ -468,10 +482,14 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     } else {
         input.parent().unwrap().to_path_buf()
     };
+    let gallery_start = scan.files.len();
     let files_abs = scan
         .files
         .iter()
-        .map(|p| {
+        .chain(&scan.gallery)
+        .enumerate()
+        .map(|(i, p)| {
+            let flag = if i < gallery_start { "--files" } else { "--gallery" };
             let cand = if base.join(p).is_dir() {
                 base.join(p)
             } else {
@@ -480,7 +498,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
             cand.canonicalize()
                 .ok()
                 .filter(|c| c.is_dir())
-                .ok_or_else(|| format!("--files {}: not a folder", p.display()))
+                .ok_or_else(|| format!("{flag} {}: not a folder", p.display()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let (root, keys, start) = if input.is_dir() {
@@ -532,6 +550,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                 .map_err(|_| format!("--files {}: outside the site folder", fd.display()))
         })
         .collect::<Result<Vec<String>, _>>()?;
+    let gallery_dirs = files_dirs[gallery_start..].to_vec();
     let in_files_dir = |k: &str| {
         files_dirs
             .iter()
@@ -710,6 +729,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
         dirs,
         out,
         git,
+        gallery: gallery_dirs,
     })
 }
 
@@ -1235,6 +1255,8 @@ struct Ctx<'a> {
     /// Single mode: files that need to be embedded as downloadable blobs.
     assets: &'a RefCell<BTreeSet<String>>,
     warnings: &'a RefCell<Vec<String>>,
+    /// Generated gallery thumbnails, keyed like site entries.
+    thumbs: &'a HashMap<String, Thumb>,
 }
 
 impl Ctx<'_> {
@@ -1542,6 +1564,136 @@ fn ymd(t: SystemTime) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+// ---------------------------------------------------------------- gallery
+
+/// Longest side of a generated thumbnail, in pixels.
+const THUMB_SIZE: u32 = 320;
+
+/// A generated thumbnail: encoded bytes and their file extension ("jpg" or "png").
+struct Thumb {
+    bytes: Vec<u8>,
+    ext: &'static str,
+}
+
+/// Images a gallery shows as tiles; anything else stays in the file list.
+fn is_gallery_image(key: &str) -> bool {
+    matches!(
+        ext_of(key).as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "avif"
+    )
+}
+
+/// Resizes to fit THUMB_SIZE; None if the image can't be decoded or the thumbnail
+/// wouldn't be smaller than the original (the original is used instead).
+fn make_thumb(path: &Path) -> Result<Option<Thumb>, String> {
+    let orig = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    let img = image::open(path).map_err(|e| e.to_string())?;
+    let small = img.thumbnail(THUMB_SIZE, THUMB_SIZE);
+    let mut bytes = Vec::new();
+    let ext = if small.color().has_alpha() {
+        small
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        "png"
+    } else {
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 80);
+        small.to_rgb8().write_with_encoder(enc).map_err(|e| e.to_string())?;
+        "jpg"
+    };
+    Ok(((bytes.len() as u64) < orig).then_some(Thumb { bytes, ext }))
+}
+
+/// Thumbnails for every decodable image in a --gallery folder, made in parallel.
+/// Undecodable images get a warning and are shown at full size.
+fn make_thumbs(site: &Site) -> HashMap<String, Thumb> {
+    let keys: Vec<&String> = site
+        .entries
+        .keys()
+        .filter(|k| {
+            site.in_gallery(parent_dir(k))
+                && matches!(ext_of(k).as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
+        })
+        .collect();
+    if keys.is_empty() {
+        return HashMap::new();
+    }
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let chunk = keys.len().div_ceil(workers);
+    let results: Vec<(&String, Result<Option<Thumb>, String>)> = std::thread::scope(|s| {
+        let handles: Vec<_> = keys
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|k| (*k, make_thumb(&site.root.join(k.as_str()))))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    });
+    let mut thumbs = HashMap::new();
+    for (k, r) in results {
+        match r {
+            Ok(Some(t)) => {
+                thumbs.insert(k.clone(), t);
+            }
+            Ok(None) => {}
+            Err(e) => print_warning(k, &format!("no thumbnail: {e}")),
+        }
+    }
+    thumbs
+}
+
+/// Where a static build writes the thumbnail of `key`: next to the image's output.
+fn thumb_out(site: &Site, key: &str, t: &Thumb) -> String {
+    let out = &site.out[key];
+    join_key(
+        &join_key(parent_dir(out), "_thumbs"),
+        &format!("{}.{}", file_name(out), t.ext),
+    )
+}
+
+/// Thumbnail grid for a gallery folder; clicking a tile opens the full image.
+fn render_gallery(ctx: &Ctx, images: &[&String]) -> String {
+    if images.is_empty() {
+        return String::new();
+    }
+    let site = ctx.site;
+    let mut tiles = String::new();
+    for k in images {
+        let full = match ctx.mode {
+            Mode::Single => match fs::read(site.root.join(k.as_str())) {
+                Ok(b) => format!(
+                    "data:{};base64,{}",
+                    mime_of(k),
+                    base64::engine::general_purpose::STANDARD.encode(b)
+                ),
+                Err(_) => continue,
+            },
+            Mode::Static => ctx.href(k, false, None).unwrap_or_default(),
+        };
+        let src = match (ctx.thumbs.get(k.as_str()), ctx.mode) {
+            (Some(t), Mode::Single) => format!(
+                "data:{};base64,{}",
+                if t.ext == "png" { "image/png" } else { "image/jpeg" },
+                base64::engine::general_purpose::STANDARD.encode(&t.bytes)
+            ),
+            (Some(t), Mode::Static) => rel_href(&ctx.from_out, &thumb_out(site, k, t)),
+            (None, _) => full.clone(),
+        };
+        let name = file_name(k);
+        tiles += &format!(
+            "<figure><img src=\"{}\" data-full=\"{}\" alt=\"{}\" loading=\"lazy\"><figcaption>{}</figcaption></figure>\n",
+            esc(&src),
+            esc(&full),
+            esc(name),
+            esc(name)
+        );
+    }
+    format!("<div class=\"gallery\">\n{tiles}</div>\n")
+}
+
 /// File list for a --files folder: subfolders, then files with size and date.
 fn render_files(ctx: &Ctx, dir: &str) -> String {
     let site = ctx.site;
@@ -1563,6 +1715,12 @@ fn render_files(ctx: &Ctx, dir: &str) -> String {
         .collect();
     files.sort_by(by_name);
 
+    let gallery = site.in_gallery(dir);
+    let (images, files_rest): (Vec<&String>, Vec<&String>) = if gallery {
+        files.iter().partition(|k| is_gallery_image(k))
+    } else {
+        (Vec::new(), files.clone())
+    };
     let mut rows = String::new();
     let parent = parent_dir(dir);
     if !dir.is_empty()
@@ -1584,7 +1742,10 @@ fn render_files(ctx: &Ctx, dir: &str) -> String {
         }
     }
     let mut total = 0;
-    for k in &files {
+    for k in &images {
+        total += fs::metadata(site.root.join(k)).map_or(0, |m| m.len());
+    }
+    for k in &files_rest {
         let meta = fs::metadata(site.root.join(k)).ok();
         let size = meta.as_ref().map_or(0, |m| m.len());
         total += size;
@@ -1608,9 +1769,16 @@ fn render_files(ctx: &Ctx, dir: &str) -> String {
         1 => format!("1 file, {}", human_size(total)),
         n => format!("{n} files, {}", human_size(total)),
     };
+    let grid = render_gallery(ctx, &images);
+    let table = if rows.is_empty() && !images.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<table class=\"files\">\n<thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>\n<tbody>\n{rows}</tbody>\n</table>\n"
+        )
+    };
     format!(
-        "<h1>{}</h1>\n<p class=\"files-summary\">{summary}</p>\n\
-         <table class=\"files\">\n<thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>\n<tbody>\n{rows}</tbody>\n</table>\n",
+        "<h1>{}</h1>\n<p class=\"files-summary\">{summary}</p>\n{grid}{table}",
         esc(&site.dir_title(dir))
     )
 }
@@ -1755,6 +1923,7 @@ const LIVE_RELOAD: &str = "<script>(()=>{let v=null;setInterval(async()=>{try{co
 
 /// Writes the site into `out_dir`; returns the number of files written.
 fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, String> {
+    let thumbs = make_thumbs(site);
     let assets = RefCell::new(BTreeSet::new());
     let warnings = RefCell::new(Vec::new());
     let io = |e: std::io::Error| e.to_string();
@@ -1815,6 +1984,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             from_id: String::new(),
             assets: &assets,
             warnings: &warnings,
+            thumbs: &thumbs,
         };
         let key = match &doc {
             Doc::Entry(k) => Some(k.as_str()),
@@ -1856,6 +2026,9 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             write(out, &fs::read(site.root.join(k)).map_err(io)?)?;
         }
     }
+    for (k, t) in &thumbs {
+        write(&thumb_out(site, k, t), &t.bytes)?;
+    }
     for (d, idx) in &site.dirs {
         match idx {
             DirIndex::Generated => {
@@ -1889,6 +2062,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
 }
 
 fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
+    let thumbs = make_thumbs(site);
     let assets = RefCell::new(BTreeSet::new());
     let warnings = RefCell::new(Vec::new());
     let ctx_for = |id: String| Ctx {
@@ -1898,6 +2072,7 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         from_id: id,
         assets: &assets,
         warnings: &warnings,
+        thumbs: &thumbs,
     };
     let order = site.reading_order();
     let section = |id: &str, title: &str, doc: Doc, inner: &str| {
@@ -2140,6 +2315,7 @@ fn run() -> Result<(), String> {
         exclude: cli.exclude.clone(),
         git: !cli.no_git,
         files: cli.files.clone(),
+        gallery: cli.gallery.clone(),
     };
     if cli.serve {
         return serve(cli.input, cli.port, opts, scan);

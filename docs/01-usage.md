@@ -20,6 +20,7 @@ Options:
       --no-git                   Don't add "last updated" dates and "edit this page" links from git
       --check                    Fail (exit code 1) if there are broken or excluded links
       --files <DIR>              Show this folder as a file list instead of rendering its contents (repeatable)
+      --gallery <DIR>            Show this folder as a thumbnail gallery of its images (repeatable)
       --allow-large              Publish files larger than 10 MB instead of failing
   -h, --help                     Print help
   -V, --version                  Print version
@@ -42,6 +43,19 @@ Every markdown file becomes a page. Each folder gets an `index.html`:
 | any other file | copied as is |
 | hidden files and folders, `node_modules`, `target`, `venv` | skipped |
 | anything matched by an ignore rule | skipped, see [Leaving files out](#leaving-files-out) |
+
+## Image galleries
+
+`--gallery` works like `--files`, but shows the folder's images as a grid of thumbnails:
+
+```bash
+webolator docs/ --gallery screenshots
+```
+
+- **Click a thumbnail** to open the full image. Arrow keys step through the folder and Esc closes it.
+- **Thumbnails are generated** (up to 320 px, PNG, JPEG, GIF and WebP) and written to a `_thumbs` folder next to the images. Images that can't be decoded, or that are already smaller than their thumbnail, are shown as they are. SVG and AVIF files are always shown as they are.
+- **Other files** in the folder (and subfolders) are still listed in a table below the grid.
+- **Everything else behaves like `--files`:** nothing inside is rendered, names are kept exactly, and it works with `--single`, where thumbnails and full images are embedded.
 
 ## Folders of files
 
