@@ -1,5 +1,17 @@
 # Mermaid diagrams
 
+Click a diagram to view it larger. Drag to pan; use the + and − buttons, mouse wheel, or a pinch gesture to zoom. Reset restores the original view, and Close or Escape returns to the page.
+
+Try it with this diagram:
+
+```mermaid
+flowchart LR
+  A[Write Markdown] --> B[Render Mermaid]
+  B --> C[Click the diagram]
+  C --> D[Zoom and pan]
+  D --> E[Close the preview]
+```
+
 A fenced code block whose language is `mermaid` becomes a diagram:
 
 ````markdown

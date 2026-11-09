@@ -99,6 +99,8 @@ aside.toc a.active { color: var(--link); border-left-color: var(--link); }
 
 article img { cursor: zoom-in; }
 article a img { cursor: pointer; }
+article pre.mermaid svg { cursor: zoom-in; }
+article pre.mermaid svg a { cursor: pointer; }
 .zoom {
   position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / .8);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; cursor: zoom-out;
@@ -106,6 +108,12 @@ article a img { cursor: pointer; }
 .zoom img { max-width: 100%; min-height: 0; flex: 0 1 auto; object-fit: contain; background: #fff; }
 .zoom-caption { color: #fff; font-size: 14px; text-align: center; word-break: break-all; }
 .zoom-caption:empty { display: none; }
+.zoom-diagram { display: block; overflow: hidden; padding: 0; cursor: default; }
+.zoom-diagram-controls { position: absolute; top: 12px; right: 12px; z-index: 1; display: flex; gap: 6px; }
+.zoom-diagram-controls button { padding: 8px 12px; cursor: pointer; }
+.zoom-diagram-content { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab; touch-action: none; }
+.zoom-diagram-content.dragging { cursor: grabbing; }
+.zoom-diagram-content svg { flex: none; width: max(80vw, 1000px); max-width: none !important; height: auto; background: var(--bg); padding: 24px; user-select: none; }
 
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin: 1em 0; }
 .gallery figure { margin: 0; }

@@ -90,6 +90,85 @@
 
   // ---- image zoom (gallery tiles: full image, arrow keys step through the folder)
   document.addEventListener('click', (e) => {
+    const diagram = e.target.closest('article pre.mermaid svg');
+    if (diagram && !e.target.closest('a')) {
+      const overlay = document.createElement('div');
+      overlay.className = 'zoom zoom-diagram';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-label', 'Enlarged diagram');
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.textContent = 'Close';
+      const controls = document.createElement('div');
+      controls.className = 'zoom-diagram-controls';
+      const zoomOut = document.createElement('button');
+      zoomOut.type = 'button';
+      zoomOut.textContent = '−';
+      zoomOut.setAttribute('aria-label', 'Zoom out');
+      const zoomIn = document.createElement('button');
+      zoomIn.type = 'button';
+      zoomIn.textContent = '+';
+      zoomIn.setAttribute('aria-label', 'Zoom in');
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.textContent = 'Reset';
+      controls.append(zoomOut, zoomIn, reset, closeButton);
+      const content = document.createElement('div');
+      content.className = 'zoom-diagram-content';
+      const copy = diagram.cloneNode(true);
+      copy.removeAttribute('id');
+      content.append(copy);
+      overlay.append(controls, content);
+      let scale = 1, x = 0, y = 0;
+      const pointers = new Map();
+      let gesture;
+      const draw = () => { copy.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; };
+      const setScale = (value) => { scale = Math.max(0.25, Math.min(8, value)); draw(); };
+      zoomIn.addEventListener('click', () => setScale(scale * 1.25));
+      zoomOut.addEventListener('click', () => setScale(scale / 1.25));
+      reset.addEventListener('click', () => { scale = 1; x = 0; y = 0; draw(); });
+      const measure = () => {
+        const points = [...pointers.values()];
+        const a = points[0], b = points[1] || a;
+        return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(b.x - a.x, b.y - a.y) };
+      };
+      content.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || event.target.closest('a')) return;
+        content.setPointerCapture(event.pointerId);
+        pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        gesture = measure();
+        content.classList.add('dragging');
+      });
+      content.addEventListener('pointermove', (event) => {
+        if (!pointers.has(event.pointerId)) return;
+        pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const next = measure();
+        x += next.x - gesture.x;
+        y += next.y - gesture.y;
+        if (pointers.size === 2 && gesture.distance) scale = Math.max(0.25, Math.min(8, scale * next.distance / gesture.distance));
+        gesture = next;
+        draw();
+      });
+      const endPointer = (event) => {
+        pointers.delete(event.pointerId);
+        gesture = pointers.size ? measure() : null;
+        if (!pointers.size) content.classList.remove('dragging');
+      };
+      content.addEventListener('pointerup', endPointer);
+      content.addEventListener('pointercancel', endPointer);
+      content.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        setScale(scale * Math.exp(-event.deltaY * 0.002));
+      }, { passive: false });
+      const close = () => { overlay.remove(); removeEventListener('keydown', onKey); };
+      const onKey = (event) => { if (event.key === 'Escape') close(); };
+      closeButton.addEventListener('click', close);
+      overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+      addEventListener('keydown', onKey);
+      document.body.append(overlay);
+      closeButton.focus();
+      return;
+    }
     const img = e.target.closest('article img');
     if (!img || img.closest('a')) return;
     const group = img.closest('.gallery');
