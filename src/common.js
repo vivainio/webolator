@@ -116,7 +116,7 @@
       const content = document.createElement('div');
       content.className = 'zoom-diagram-content';
       const copy = diagram.cloneNode(true);
-      copy.removeAttribute('id');
+      // keep the id: Mermaid's embedded <style> and arrow markers are scoped to it
       content.append(copy);
       overlay.append(controls, content);
       let scale = 1, x = 0, y = 0;
