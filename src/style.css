@@ -182,3 +182,6 @@ table.files tbody tr:hover { background: var(--hover); }
   .pager { flex-direction: column; }
   .pager a.next:only-child { flex-basis: auto; }
 }
+nav.side img.logo { height: 22px; width: auto; vertical-align: -5px; margin-right: 4px; }
+.site-footer { margin: 24px 0 0; font-size: 13px; color: var(--muted); }
+.page-meta + .site-footer, .pager + .site-footer { margin-top: 16px; }

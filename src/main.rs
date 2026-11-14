@@ -160,6 +160,80 @@ fn print_warning(label: &str, w: &str) {
     eprintln!("warning: {label}: {w}");
 }
 
+// ---------------------------------------------------------------- config
+
+/// Config files, in priority order. Both use the same `[project]` syntax, so a
+/// Zensical project builds as is.
+const CONFIG_FILES: &[&str] = &["webolator.toml", "zensical.toml"];
+
+/// Site-wide settings from an optional `webolator.toml` / `zensical.toml`.
+#[derive(Clone, Default)]
+struct Config {
+    site_name: Option<String>,
+    description: Option<String>,
+    author: Option<String>,
+    url: Option<String>,
+    copyright: Option<String>,
+    repo_url: Option<String>,
+    /// Logo and favicon: paths inside the site folder.
+    logo: Option<String>,
+    favicon: Option<String>,
+    docs_dir: Option<String>,
+    /// The file the settings came from.
+    path: Option<PathBuf>,
+}
+
+fn parse_config(text: &str) -> Result<Config, String> {
+    let root: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
+    // Settings live under [project]; top level is accepted too.
+    let proj = root
+        .get("project")
+        .and_then(|v| v.as_table())
+        .unwrap_or(&root);
+    let get = |t: &toml::Table, k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let theme = proj.get("theme").and_then(|v| v.as_table());
+    Ok(Config {
+        site_name: get(proj, "site_name"),
+        description: get(proj, "site_description"),
+        author: get(proj, "site_author"),
+        url: get(proj, "site_url").map(|u| u.trim_end_matches('/').to_string()),
+        copyright: get(proj, "copyright"),
+        repo_url: get(proj, "repo_url"),
+        logo: theme.and_then(|t| get(t, "logo")),
+        favicon: theme.and_then(|t| get(t, "favicon")),
+        docs_dir: get(proj, "docs_dir"),
+        path: None,
+    })
+}
+
+/// Finds the config next to the input (or in its parent folder, the usual place
+/// for a Zensical project whose pages are in `docs/`).
+fn load_config(input: &Path) -> Result<Config, String> {
+    let dir = if input.is_dir() {
+        Some(input)
+    } else {
+        input.parent()
+    };
+    for d in dir.into_iter().flat_map(|d| d.ancestors().take(2)) {
+        for name in CONFIG_FILES {
+            let p = d.join(name);
+            if !p.is_file() {
+                continue;
+            }
+            let mut c =
+                parse_config(&read_lossy(&p)).map_err(|e| format!("{}: {e}", p.display()))?;
+            c.path = Some(p);
+            return Ok(c);
+        }
+    }
+    Ok(Config::default())
+}
+
 // ---------------------------------------------------------------- site model
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -177,6 +251,10 @@ struct Entry {
     order: Option<i64>,
     /// Front matter `hidden: true`: built and linkable, but not in the sidebar or prev/next.
     hidden: bool,
+    /// Front matter `description:`, else the first paragraph (plain text, shortened).
+    description: String,
+    /// All front matter `key: value` pairs.
+    fm: BTreeMap<String, String>,
 }
 
 enum DirIndex {
@@ -189,6 +267,7 @@ enum DirIndex {
 struct Site {
     root: PathBuf,
     title: String,
+    config: Config,
     /// Source files, keyed by '/'-separated path relative to root.
     entries: BTreeMap<String, Entry>,
     /// Directories ("" is root) that get an index.
@@ -472,9 +551,26 @@ fn read_lossy(p: &Path) -> String {
 
 /// Build the site model from a directory, or by crawling links from a single file.
 fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
-    let input = input
+    let mut input = input
         .canonicalize()
         .map_err(|e| format!("{}: {e}", input.display()))?;
+    let config = load_config(&input)?;
+    // A project folder with a config: the pages are in `docs_dir` (Zensical's
+    // default is docs/, which we only assume for zensical.toml).
+    if input.is_dir() && config.path.as_deref().and_then(Path::parent) == Some(input.as_path()) {
+        let is_zensical =
+            config.path.as_ref().and_then(|p| p.file_name()) == Some("zensical.toml".as_ref());
+        let docs = match &config.docs_dir {
+            Some(d) => Some(d.as_str()),
+            None => (is_zensical && input.join("docs").is_dir()).then_some("docs"),
+        };
+        if let Some(d) = docs {
+            input = input
+                .join(d)
+                .canonicalize()
+                .map_err(|e| format!("docs_dir {d}: {e}"))?;
+        }
+    }
     // --files folders: relative to the input folder (or the input file's folder),
     // falling back to the current directory.
     let base = if input.is_dir() {
@@ -562,7 +658,10 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     };
 
     let mut entries = BTreeMap::new();
-    for k in keys.into_iter().filter(|k| k != CUSTOM_CSS) {
+    for k in keys
+        .into_iter()
+        .filter(|k| k != CUSTOM_CSS && !CONFIG_FILES.contains(&k.as_str()))
+    {
         let kind = kind_of(&k);
         let entry = if in_files_dir(&k) {
             // Copied as is and only shown in the folder's file list.
@@ -571,6 +670,8 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                 title: file_name(&k).to_string(),
                 order: None,
                 hidden: true,
+                description: String::new(),
+                fm: BTreeMap::new(),
             }
         } else if kind == Kind::Page {
             let m = page_meta(&read_lossy(&root.join(&k)));
@@ -581,6 +682,8 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                     .unwrap_or_else(|| display_name(&stem(&k)).to_string()),
                 order: m.order,
                 hidden: m.hidden,
+                description: m.description,
+                fm: m.fm,
             }
         } else {
             Entry {
@@ -588,6 +691,8 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                 title: file_name(&k).to_string(),
                 order: None,
                 hidden: false,
+                description: String::new(),
+                fm: BTreeMap::new(),
             }
         };
         entries.insert(k, entry);
@@ -719,6 +824,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     }
 
     let title = match dirs.get("") {
+        _ if config.site_name.is_some() => config.site_name.clone().unwrap(),
         Some(DirIndex::Entry(k)) if entries[k].kind == Kind::Page => entries[k].title.clone(),
         _ => root
             .file_name()
@@ -729,6 +835,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
     Ok(Site {
         root,
         title,
+        config,
         entries,
         dirs,
         out,
@@ -1126,6 +1233,32 @@ struct Meta {
     title: Option<String>,
     order: Option<i64>,
     hidden: bool,
+    description: String,
+    fm: BTreeMap<String, String>,
+}
+
+/// Text of a node's inline content, with line breaks as spaces.
+fn plain_text<'a>(n: &'a AstNode<'a>) -> String {
+    let mut t = String::new();
+    for d in n.descendants() {
+        match &d.data.borrow().value {
+            NodeValue::Text(s) => t.push_str(s),
+            NodeValue::Code(c) => t.push_str(&c.literal),
+            NodeValue::SoftBreak | NodeValue::LineBreak => t.push(' '),
+            _ => {}
+        }
+    }
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Shortens to about `max` characters at a word boundary.
+fn shorten(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let cut: String = s.chars().take(max).collect();
+    let cut = cut.rsplit_once(' ').map_or(cut.as_str(), |x| x.0);
+    format!("{}…", cut.trim_end_matches(['.', ',', ';', ':']))
 }
 
 /// Title (front matter `title:`, else the first `# heading`) plus the optional
@@ -1142,6 +1275,7 @@ fn page_meta(md: &str) -> Meta {
                     continue;
                 };
                 let v = v.trim().trim_matches(['"', '\'']).trim();
+                meta.fm.insert(k.trim().to_string(), v.to_string());
                 match k.trim() {
                     "title" if !v.is_empty() => fm_title = Some(v.to_string()),
                     "order" => meta.order = v.parse().ok(),
@@ -1155,17 +1289,19 @@ fn page_meta(md: &str) -> Meta {
         let h1 = doc
             .descendants()
             .find(|n| matches!(n.data.borrow().value, NodeValue::Heading(ref h) if h.level == 1))?;
-        let mut t = String::new();
-        for n in h1.descendants() {
-            match &n.data.borrow().value {
-                NodeValue::Text(s) => t.push_str(s),
-                NodeValue::Code(c) => t.push_str(&c.literal),
-                _ => {}
-            }
-        }
-        let t = t.trim().to_string();
+        let t = plain_text(h1);
         (!t.is_empty()).then_some(t)
     });
+    meta.description = match meta.fm.get("description").filter(|d| !d.is_empty()) {
+        Some(d) => d.clone(),
+        None => doc
+            .children()
+            .filter(|n| matches!(n.data.borrow().value, NodeValue::Paragraph))
+            .map(plain_text)
+            .find(|t| !t.is_empty())
+            .map(|t| shorten(&t, 180))
+            .unwrap_or_default(),
+    };
     meta
 }
 
@@ -1180,7 +1316,9 @@ fn syntax_set() -> syntect::parsing::SyntaxSet {
     use syntect::parsing::syntax_definition::SyntaxDefinition;
     let mut builder = two_face::syntax::extra_newlines().into_builder();
     let luau = include_str!("syntaxes/Luau.sublime-syntax");
-    builder.add(SyntaxDefinition::load_from_str(luau, true, Some("Luau")).expect("bundled Luau syntax"));
+    builder.add(
+        SyntaxDefinition::load_from_str(luau, true, Some("Luau")).expect("bundled Luau syntax"),
+    );
     builder.build()
 }
 
@@ -1343,6 +1481,68 @@ impl Ctx<'_> {
     fn warn(&self, w: String) {
         self.warnings.borrow_mut().push(w);
     }
+}
+
+impl Ctx<'_> {
+    /// URL of a site file named in the config (logo, favicon), or None if it isn't in the site.
+    fn config_asset(&self, path: &str) -> Option<String> {
+        let key = path.trim_start_matches("./").trim_start_matches('/');
+        if !self.site.entries.contains_key(key) {
+            self.warn(format!("{path}: not found in the site folder"));
+            return None;
+        }
+        self.rewrite("", key, true)
+    }
+
+    /// `<link rel="icon">`: the configured favicon, else a favicon.* file in the root.
+    fn favicon_link(&self) -> String {
+        let site = self.site;
+        let path = site.config.favicon.clone().or_else(|| {
+            ["favicon.svg", "favicon.png", "favicon.ico"]
+                .into_iter()
+                .find(|f| site.entries.contains_key(*f))
+                .map(String::from)
+        });
+        path.and_then(|p| self.config_asset(&p))
+            .map(|h| format!("<link rel=\"icon\" href=\"{}\">\n", esc(&h)))
+            .unwrap_or_default()
+    }
+
+    /// Description, author, canonical and OpenGraph tags for a static page.
+    fn seo_head(&self, title: &str, desc: Option<&str>, out: &str) -> String {
+        let c = &self.site.config;
+        let mut h = String::new();
+        let meta = |k: &str, v: &str, prop: bool| {
+            format!(
+                "<meta {}=\"{k}\" content=\"{}\">\n",
+                if prop { "property" } else { "name" },
+                esc(v)
+            )
+        };
+        let desc = desc.or(c.description.as_deref());
+        if let Some(d) = desc {
+            h += &meta("description", d, false);
+            h += &meta("og:description", d, true);
+        }
+        if let Some(a) = &c.author {
+            h += &meta("author", a, false);
+        }
+        h += &meta("og:title", title, true);
+        h += &meta("og:site_name", &self.site.title, true);
+        h += &meta("og:type", "website", true);
+        if let Some(u) = &c.url {
+            let page = page_url(u, out);
+            h += &format!("<link rel=\"canonical\" href=\"{}\">\n", esc(&page));
+            h += &meta("og:url", &page, true);
+        }
+        h
+    }
+}
+
+/// Absolute URL of an output file; index.html is shown as its folder.
+fn page_url(base: &str, out: &str) -> String {
+    let path = out.strip_suffix("index.html").unwrap_or(out);
+    format!("{base}/{}", percent_encode_path(path))
 }
 
 fn render_markdown(ctx: &Ctx, key: &str) -> String {
@@ -1538,8 +1738,12 @@ impl Ctx<'_> {
     /// Article with its footer (meta line, pager) and table of contents.
     fn wrap(&self, content: &str, key: Option<&str>, order: &[Doc], doc: &Doc) -> String {
         let meta = key.map(|k| self.page_meta_line(k)).unwrap_or_default();
+        let foot = match &self.site.config.copyright {
+            Some(c) => format!("<footer class=\"site-footer\">{c}</footer>\n"),
+            None => String::new(),
+        };
         format!(
-            "<div class=\"page-wrap\">\n<article>\n{content}{meta}{}</article>\n{}</div>\n",
+            "<div class=\"page-wrap\">\n<article>\n{content}{meta}{}{foot}</article>\n{}</div>\n",
             self.pager(order, doc),
             render_toc(content)
         )
@@ -1837,7 +2041,20 @@ fn render_nav(ctx: &Ctx, active: Option<&str>) -> String {
             extra
         )
     };
+    let logo = site
+        .config
+        .logo
+        .as_deref()
+        .and_then(|l| ctx.config_asset(l))
+        .map(|h| format!("<img class=\"logo\" src=\"{}\" alt=\"\"> ", esc(&h)))
+        .unwrap_or_default();
     let root = link("", true, &site.title, "").replacen("<a ", "<a data-site ", 1);
+    let root = if logo.is_empty() {
+        root
+    } else {
+        // The logo goes inside the link, before the name.
+        root.replacen('>', &format!(">{logo}"), 1)
+    };
     format!(
         "<div class=\"nav-head\">{root}<button class=\"menu-toggle\" aria-label=\"Menu\" aria-expanded=\"false\">☰</button>{THEME_BUTTON}</div>\n{}",
         nav_dir(site, "", &link)
@@ -2020,12 +2237,17 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         let body = ctx.wrap(&body_fn(&ctx), key, &order, &doc);
         let nav = show_nav(site).then(|| render_nav(&ctx, Some(from_out)));
         let tail = tail_for(from_out, &body);
-        let head = head_for(from_out);
         let full_title = if title == site.title {
             title.to_string()
         } else {
             format!("{title} · {}", site.title)
         };
+        let desc = match &doc {
+            Doc::Entry(k) => Some(site.entries[k].description.as_str()).filter(|d| !d.is_empty()),
+            Doc::Listing(_) => None,
+        };
+        let head =
+            head_for(from_out) + &ctx.favicon_link() + &ctx.seo_head(&full_title, desc, from_out);
         write(
             from_out,
             page_html(&Page {
@@ -2162,6 +2384,7 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
 
     let ctx = ctx_for(String::new());
     let nav = show_nav(site).then(|| render_nav(&ctx, None));
+    let favicon = ctx.favicon_link();
     flush("nav");
 
     let mut asset_json = String::from("{");
@@ -2188,13 +2411,14 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         };
         tail = mermaid_script(&src, true) + &tail;
     }
-    let head = match custom_css(site, opts)? {
-        Some(css) => format!(
-            "<style>\n{}\n</style>\n",
-            css.replace("</style", "<\\/style")
-        ),
-        None => String::new(),
-    };
+    let head = favicon
+        + &match custom_css(site, opts)? {
+            Some(css) => format!(
+                "<style>\n{}\n</style>\n",
+                css.replace("</style", "<\\/style")
+            ),
+            None => String::new(),
+        };
     Ok(page_html(&Page {
         title: &site.title,
         nav,
