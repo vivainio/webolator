@@ -1545,6 +1545,54 @@ fn page_url(base: &str, out: &str) -> String {
     format!("{base}/{}", percent_encode_path(path))
 }
 
+/// For `layout: home` pages: pulls the first `# heading` and the tagline out of the
+/// document and returns the hero block built from them. The tagline is front matter
+/// `tagline:` or `description:`, else the first paragraph. Buttons come from
+/// `action:` / `action2:` ("Label | link"), else the defaults.
+fn take_hero<'a>(ctx: &Ctx, key: &str, doc: &'a AstNode<'a>) -> String {
+    let e = &ctx.site.entries[key];
+    let mut title = e.title.clone();
+    if let Some(h1) = doc
+        .children()
+        .find(|n| matches!(n.data.borrow().value, NodeValue::Heading(ref h) if h.level == 1))
+    {
+        let t = plain_text(h1);
+        if !t.is_empty() {
+            title = t;
+        }
+        h1.detach();
+    }
+    let tagline = match e.fm.get("tagline").or(e.fm.get("description")) {
+        Some(t) if !t.is_empty() => t.clone(),
+        _ => match doc
+            .children()
+            .find(|n| matches!(n.data.borrow().value, NodeValue::Paragraph))
+        {
+            Some(p) => {
+                let t = plain_text(p);
+                p.detach();
+                t
+            }
+            None => String::new(),
+        },
+    };
+    let dir = parent_dir(key);
+    let mut actions: Vec<(String, String)> = ["action", "action2"]
+        .iter()
+        .filter_map(|k| e.fm.get(*k))
+        .filter_map(|v| {
+            let (label, url) = v.split_once('|')?;
+            let url = url.trim();
+            let href = ctx.rewrite(dir, url, false).unwrap_or(url.to_string());
+            Some((label.trim().to_string(), href))
+        })
+        .collect();
+    if actions.is_empty() {
+        actions = default_actions(ctx, &Doc::Entry(key.to_string()));
+    }
+    hero_html(&title, &tagline, &actions)
+}
+
 fn render_markdown(ctx: &Ctx, key: &str) -> String {
     let md = read_lossy(&ctx.site.root.join(key));
     let prefix = match ctx.mode {
@@ -1555,6 +1603,13 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
     let arena = Arena::new();
     let doc = parse_document(&arena, &md, &opts);
     let dir = parent_dir(key);
+    let entry = ctx.site.entries.get(key);
+    let home = entry.is_some_and(|e| e.fm.get("layout").map(String::as_str) == Some("home"));
+    let hero = if home {
+        take_hero(ctx, key, doc)
+    } else {
+        String::new()
+    };
     visit_urls(doc, &mut |url, is_img| ctx.rewrite(dir, url, is_img));
     for node in doc.descendants() {
         if let NodeValue::WikiLink(w) = &mut node.data.borrow_mut().value {
@@ -1593,6 +1648,17 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
     plugins.render.codefence_syntax_highlighter = Some(highlighter());
     let mut html = String::new();
     format_html_with_plugins(doc, &opts, &mut html, &plugins).expect("html formatting");
+    if home {
+        // Section cards for the folder this page is the index of.
+        let cards = ctx
+            .site
+            .dirs
+            .keys()
+            .find(|d| ctx.site.index_key(d) == Some(key))
+            .map(|d| render_cards(ctx, d))
+            .unwrap_or_default();
+        html = format!("{hero}{html}{cards}");
+    }
     if ctx.mode == Mode::Single {
         // Footnote ids would collide between pages.
         html = html
@@ -1602,8 +1668,111 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
     html
 }
 
+/// Primary and secondary buttons for a landing page: the first page after this one,
+/// and the repository.
+fn default_actions(ctx: &Ctx, current: &Doc) -> Vec<(String, String)> {
+    let mut v = Vec::new();
+    let first = ctx
+        .site
+        .reading_order()
+        .into_iter()
+        .find(|d| d != current)
+        .and_then(|d| ctx.doc_link(&d));
+    if let Some((href, _)) = first {
+        v.push(("Get started".to_string(), href));
+    }
+    if let Some(r) = &ctx.site.config.repo_url {
+        v.push(("Repository".to_string(), r.clone()));
+    }
+    v
+}
+
+fn hero_html(title: &str, tagline: &str, actions: &[(String, String)]) -> String {
+    let mut h = format!("<header class=\"hero\">\n<h1>{}</h1>\n", esc(title));
+    if !tagline.is_empty() {
+        h += &format!("<p class=\"tagline\">{}</p>\n", esc(tagline));
+    }
+    if !actions.is_empty() {
+        h += "<p class=\"actions\">";
+        for (i, (label, href)) in actions.iter().enumerate() {
+            let class = if i == 0 { "btn primary" } else { "btn" };
+            h += &format!(
+                "<a class=\"{class}\" href=\"{}\">{}</a>",
+                esc(href),
+                esc(label)
+            );
+        }
+        h += "</p>\n";
+    }
+    h + "</header>\n"
+}
+
+/// Summary for a section card: the folder index's description, else a page count.
+fn dir_summary(site: &Site, dir: &str) -> String {
+    if let Some(e) = site.index_key(dir).and_then(|k| site.entries.get(k)) {
+        if !e.description.is_empty() {
+            return e.description.clone();
+        }
+    }
+    let n = site
+        .reading_order()
+        .iter()
+        .filter(|d| matches!(d, Doc::Entry(k) if k.starts_with(&format!("{dir}/"))))
+        .count();
+    match n {
+        0 => String::new(),
+        1 => "1 page".into(),
+        n => format!("{n} pages"),
+    }
+}
+
+/// A grid of cards for the pages and sections directly in `dir`.
+fn render_cards(ctx: &Ctx, dir: &str) -> String {
+    let site = ctx.site;
+    let idx = site.index_key(dir);
+    let mut h = String::new();
+    for (k, is_dir) in site.children(dir) {
+        if Some(k.as_str()) == idx {
+            continue;
+        }
+        let Some(href) = ctx.href(&k, is_dir, None) else {
+            continue;
+        };
+        let (title, desc) = if is_dir {
+            (
+                display_name(file_name(&k)).to_string(),
+                dir_summary(site, &k),
+            )
+        } else {
+            let e = &site.entries[&k];
+            (e.title.clone(), e.description.clone())
+        };
+        let desc = if desc.is_empty() {
+            String::new()
+        } else {
+            format!("<p>{}</p>", esc(&desc))
+        };
+        h += &format!(
+            "<a class=\"card\" href=\"{}\"><h3>{}</h3>{desc}</a>\n",
+            esc(&href),
+            esc(&title)
+        );
+    }
+    if h.is_empty() {
+        h
+    } else {
+        format!("<div class=\"cards\">\n{h}</div>\n")
+    }
+}
+
 fn render_listing(ctx: &Ctx, dir: &str) -> String {
     let site = ctx.site;
+    if dir.is_empty() {
+        // A generated home page.
+        let actions = default_actions(ctx, &Doc::Listing(String::new()));
+        let tagline = site.config.description.clone().unwrap_or_default();
+        return hero_html(&site.title, &tagline, &actions) + &render_cards(ctx, dir);
+    }
     let mut h = format!(
         "<h1>{}</h1>\n<ul class=\"listing\">\n",
         esc(&site.dir_title(dir))
@@ -1617,8 +1786,13 @@ fn render_listing(ctx: &Ctx, dir: &str) -> String {
             h += &format!("<li><a href=\"{}\">{}/</a></li>\n", esc(&href), esc(name));
         } else {
             let e = &site.entries[&k];
+            let desc = if e.description.is_empty() {
+                String::new()
+            } else {
+                format!(" <span class=\"desc\">{}</span>", esc(&e.description))
+            };
             h += &format!(
-                "<li><a href=\"{}\">{}</a>{}</li>\n",
+                "<li><a href=\"{}\">{}</a>{}{desc}</li>\n",
                 esc(&href),
                 esc(&e.title),
                 tag(&k, e.kind)

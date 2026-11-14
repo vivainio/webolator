@@ -185,3 +185,20 @@ table.files tbody tr:hover { background: var(--hover); }
 nav.side img.logo { height: 22px; width: auto; vertical-align: -5px; margin-right: 4px; }
 .site-footer { margin: 24px 0 0; font-size: 13px; color: var(--muted); }
 .page-meta + .site-footer, .pager + .site-footer { margin-top: 16px; }
+.hero { text-align: center; padding: 48px 0 32px; }
+.hero h1 { font-size: 2.6em; margin: 0 0 8px; border: 0; padding: 0; }
+.hero .tagline { font-size: 1.25em; color: var(--muted); max-width: 36em; margin: 0 auto 24px; }
+.hero .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 0; }
+.btn {
+  display: inline-block; padding: 8px 20px; border-radius: 8px; border: 1px solid var(--border);
+  color: var(--fg); font-weight: 600;
+}
+.btn:hover { border-color: var(--link); text-decoration: none; }
+.btn.primary { background: var(--link); border-color: var(--link); color: var(--bg); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin: 24px 0; }
+.card { display: block; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; color: var(--fg); }
+.card:hover { border-color: var(--link); text-decoration: none; }
+.card h3 { margin: 0 0 4px; font-size: 1.05em; color: var(--link); }
+.card p { margin: 0; font-size: 14px; color: var(--muted); }
+ul.listing .desc { color: var(--muted); font-size: 14px; }
+ul.listing .desc::before { content: "— "; }
