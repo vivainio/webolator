@@ -56,7 +56,7 @@ fn words(text: &str, seen: &mut HashSet<String>, out: &mut Vec<String>) {
     for w in text.split(|c: char| !c.is_alphanumeric()) {
         let w = w.to_lowercase();
         let n = w.chars().count();
-        if n < 2 || n > 32 || STOP.contains(&w.as_str()) {
+        if !(2..=32).contains(&n) || STOP.contains(&w.as_str()) {
             continue;
         }
         if seen.insert(w.clone()) {
