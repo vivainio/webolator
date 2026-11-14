@@ -41,6 +41,7 @@ flowchart LR
 
 ## See it in action
 
+- **[The showcase site](https://vivainio.github.io/webolator/showcase/)** is built from [`examples/showcase`](https://github.com/vivainio/webolator/tree/main/examples/showcase), a Zensical-style project with a `zensical.toml`, a landing page, an explicit nav, tabs, admonitions and diagrams.
 - **[The demo site](https://vivainio.github.io/webolator/demo/)** is built from [`examples/demo`](https://github.com/vivainio/webolator/tree/main/examples/demo). It shows raw HTML, log and PDF files next to the markdown.
 - **[This documentation as a single file](https://vivainio.github.io/webolator/webolator-docs.html)** is every page of these docs in one self-contained HTML file.
 

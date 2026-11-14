@@ -44,6 +44,7 @@ jobs:
         run: |
           ./target/release/webolator docs -o _site --check
           ./target/release/webolator examples/demo -o _site/demo
+          ./target/release/webolator examples/showcase -o _site/showcase --check
           ./target/release/webolator docs --single -o _site/webolator-docs.html
 
       - uses: actions/upload-pages-artifact@v4

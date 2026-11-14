@@ -1860,6 +1860,9 @@ fn dir_summary(site: &Site, dir: &str) -> String {
 /// A grid of cards for the pages and sections directly in `dir`.
 fn render_cards(ctx: &Ctx, dir: &str) -> String {
     let site = ctx.site;
+    if let (Some(nav), true) = (&site.nav, dir.is_empty()) {
+        return nav_cards(ctx, nav);
+    }
     let idx = site.index_key(dir);
     let mut h = String::new();
     for (k, is_dir) in site.children(dir) {
@@ -1878,6 +1881,56 @@ fn render_cards(ctx: &Ctx, dir: &str) -> String {
             let e = &site.entries[&k];
             (e.title.clone(), e.description.clone())
         };
+        let desc = if desc.is_empty() {
+            String::new()
+        } else {
+            format!("<p>{}</p>", esc(&desc))
+        };
+        h += &format!(
+            "<a class=\"card\" href=\"{}\"><h3>{}</h3>{desc}</a>\n",
+            esc(&href),
+            esc(&title)
+        );
+    }
+    if h.is_empty() {
+        h
+    } else {
+        format!("<div class=\"cards\">\n{h}</div>\n")
+    }
+}
+
+/// Cards for an explicit nav: one per top-level item. A section links to its first
+/// page and is summarised by that page's description.
+fn nav_cards(ctx: &Ctx, items: &[NavItem]) -> String {
+    let site = ctx.site;
+    let home = site.index_key("");
+    let mut h = String::new();
+    for item in items {
+        let mut pages = Vec::new();
+        nav_pages(std::slice::from_ref(item), &mut pages);
+        let (title, href, desc) = match item {
+            NavItem::Page(_, k) if Some(k.as_str()) == home => continue,
+            NavItem::Page(_, k) => (
+                site.entries[k].title.clone(),
+                ctx.href(k, false, None),
+                site.entries[k].description.clone(),
+            ),
+            NavItem::Link(label, url) => (label.clone(), Some(url.clone()), String::new()),
+            NavItem::Section(label, _) => {
+                let first = pages.first();
+                let n = pages.len();
+                (
+                    label.clone(),
+                    first.and_then(|k| ctx.href(k, false, None)),
+                    if n == 1 {
+                        "1 page".to_string()
+                    } else {
+                        format!("{n} pages")
+                    },
+                )
+            }
+        };
+        let Some(href) = href else { continue };
         let desc = if desc.is_empty() {
             String::new()
         } else {

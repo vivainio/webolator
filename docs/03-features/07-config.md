@@ -1,6 +1,6 @@
 # Site config and landing page
 
-Everything here is optional. Without any config webolator still builds from the folder alone.
+Everything here is optional. Without any config webolator still builds from the folder alone. For a working example, see the [showcase site](https://vivainio.github.io/webolator/showcase/) and its [source](https://github.com/vivainio/webolator/tree/main/examples/showcase).
 
 ## `webolator.toml` / `zensical.toml`
 

@@ -71,6 +71,7 @@ Try it on the bundled demo:
 
 ```bash
 cargo run -- examples/demo --serve
+cargo run -- examples/showcase --serve   # landing page, config, tabs, admonitions
 ```
 
 ### How the site is put together

@@ -1,0 +1,27 @@
+# A Zensical-style project: webolator builds it as is.
+#   webolator examples/showcase --serve
+[project]
+site_name = "Acme Docs"
+site_description = "A sample site showing the landing page, tabs, admonitions and an explicit nav."
+site_url = "https://vivainio.github.io/webolator/showcase"
+site_author = "Acme Team"
+copyright = "&copy; 2026 Acme, a made-up company"
+repo_url = "https://github.com/vivainio/webolator/tree/main/examples/showcase"
+
+nav = [
+  "index.md",
+  { "Getting started" = [
+    "getting-started/install.md",
+    { "Your first page" = "getting-started/first-page.md" },
+  ] },
+  { "Guide" = [
+    "guide/admonitions.md",
+    "guide/snippets.md",
+  ] },
+  { "Code and diagrams" = "reference/code.md" },
+  { "webolator on GitHub" = "https://github.com/vivainio/webolator" },
+]
+
+[project.theme]
+logo = "assets/logo.svg"
+favicon = "assets/logo.svg"
