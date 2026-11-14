@@ -160,7 +160,7 @@ See [Single-file output](03-features/03-single-file.md).
 
 ## Claude Code skill
 
-`webolator skill` prints a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) (a `SKILL.md`) that tells an agent how to use webolator: the commands and flags, the folder rules, the config keys and the markdown extras. The text is built into the binary, so it always matches the installed version.
+`webolator skill` prints a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) (a `SKILL.md`) that tells an agent how to use webolator: the commands and flags, the folder rules, the config keys and the markdown extras. The text is built into the binary, so it always matches the installed version. The same file is in the repository as [`skills/webolator/SKILL.md`](https://github.com/vivainio/webolator/blob/main/skills/webolator/SKILL.md).
 
 ```bash
 webolator skill                    # print it

@@ -3171,7 +3171,7 @@ fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(
 
 // ---------------------------------------------------------------- main
 
-const SKILL: &str = include_str!("skill.md");
+const SKILL: &str = include_str!("../skills/webolator/SKILL.md");
 
 /// `webolator skill [--install] [--project]`: prints the Claude Code skill, or writes it to
 /// $CLAUDE_CONFIG_DIR/skills/webolator/ (default ~/.claude), or ./.claude/ with --project.
