@@ -52,7 +52,7 @@ To design your own, give `index.md` the home layout:
 ```markdown
 ---
 layout: home
-tagline: Zero-config docs from markdown.
+tagline: Docs from plain markdown.
 action: Get started | install.md
 action2: GitHub | https://github.com/acme/acme
 ---

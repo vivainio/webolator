@@ -1,6 +1,6 @@
 # webolator
 
-**Point it at a folder of markdown and get a website.** No config file, no index file, no `SUMMARY.md`.
+**Point it at a folder of markdown and get a website.** It needs no config file, no index file and no `SUMMARY.md`. When you want more control, an optional [`webolator.toml`](03-features/07-config.md) (or a Zensical `zensical.toml`) sets the site name, navigation and more.
 
 This site is itself built by webolator from the [`docs/`](https://github.com/vivainio/webolator/tree/main/docs) folder of the repository. See [Publishing to GitHub Pages](04-publishing.md) for how.
 
@@ -13,6 +13,7 @@ uvx webolator docs/ --serve
 ```mermaid
 flowchart LR
     A[folder or .md file] --> B[scan / follow links]
+    CFG[webolator.toml<br/>optional] -.-> C
     B --> C[render markdown<br/>+ highlight code]
     C --> D[rewrite links]
     D --> E1[static site]
@@ -22,7 +23,7 @@ flowchart LR
 
 ## Features
 
-- **Zero config.** The sidebar comes from the directory tree, and page titles come from each file's first `# heading`.
+- **Zero config by default.** The sidebar comes from the directory tree, and page titles come from each file's first `# heading`. A [config file](03-features/07-config.md) is optional.
 - **[Mermaid diagrams](03-features/01-mermaid.md)** are rendered in the browser.
 - **[Syntax highlighting](03-features/02-highlighting.md)** happens at build time, with light and dark themes.
 - **[Cross-file links](02-links.md)** to `.md` files, folders and headings are rewritten to the right place.

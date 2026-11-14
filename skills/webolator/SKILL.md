@@ -5,7 +5,7 @@ description: Turn a folder of markdown, or a single .md file, into a browsable w
 
 # webolator
 
-Zero-config markdown to website. Point it at a folder: the sidebar comes from the directory tree and page titles from each file's first `# heading`. No index file or `SUMMARY.md` is needed.
+Markdown to website, with no config required. Point it at a folder: the sidebar comes from the directory tree and page titles from each file's first `# heading`. No index file or `SUMMARY.md` is needed.
 
 ## Commands
 

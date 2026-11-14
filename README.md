@@ -1,10 +1,10 @@
 # webolator
 
-Turn a folder of markdown, or a single `.md` file, into a browsable website. No config file, no index file, no `SUMMARY.md`.
+Turn a folder of markdown, or a single `.md` file, into a browsable website. It needs no config file, no index file and no `SUMMARY.md`. When you want more control, an optional `webolator.toml` (or a Zensical `zensical.toml`) sets the site name, navigation and more.
 
 **Docs:** https://vivainio.github.io/webolator/ (built with webolator, of course)
 
-- **Zero config.** Point it at a folder and the navigation comes from the directory tree. Page titles come from the first `# heading`.
+- **Zero config by default.** Point it at a folder and the navigation comes from the directory tree. Page titles come from the first `# heading`. Everything else is opt-in, through front matter, flags or an optional config file.
 - **Mermaid.** ```` ```mermaid ```` blocks become diagrams, rendered in the browser.
 - **Syntax highlighting** happens at build time (syntect), with light and dark themes and no JavaScript.
 - **Cross-file links work.** `other.md`, `dir/`, `../x.md#some-heading` and `/root/relative.md` are rewritten to the right pages and anchors. Broken links print a warning.

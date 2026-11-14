@@ -1,4 +1,4 @@
 [project]
-site_description = "Turn a folder of markdown into a website. No config, no index file, no SUMMARY.md."
+site_description = "Turn a folder of markdown into a website. No config needed, no index file, no SUMMARY.md."
 site_url = "https://vivainio.github.io/webolator"
 repo_url = "https://github.com/vivainio/webolator"

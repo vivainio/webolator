@@ -1,5 +1,6 @@
 //! webolator: turn a markdown file or a folder of markdown into a browsable site.
-//! No config, no index files. Mermaid is rendered client-side.
+//! No config needed (an optional webolator.toml / zensical.toml is read), no index files.
+//! Mermaid is rendered client-side.
 
 mod ext;
 mod search;
