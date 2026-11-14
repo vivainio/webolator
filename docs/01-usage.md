@@ -157,3 +157,15 @@ webolator docs/ --single -o docs.html
 ```
 
 See [Single-file output](03-features/03-single-file.md).
+
+## Claude Code skill
+
+`webolator skill` prints a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) (a `SKILL.md`) that tells an agent how to use webolator: the commands and flags, the folder rules, the config keys and the markdown extras. The text is built into the binary, so it always matches the installed version.
+
+```bash
+webolator skill                    # print it
+webolator skill --install          # write ~/.claude/skills/webolator/SKILL.md
+webolator skill --install --project  # write ./.claude/skills/webolator/SKILL.md instead
+```
+
+`skill` is only a command when it is the first argument. To build a folder with that name, write `webolator ./skill`.

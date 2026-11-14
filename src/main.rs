@@ -72,7 +72,8 @@ const SKIP_DIRS: &[&str] = &["node_modules", "target", "__pycache__", "venv"];
 #[derive(Parser)]
 #[command(
     version,
-    about = "Render markdown files into a zero-config website (with mermaid)"
+    about = "Render markdown files into a zero-config website (with mermaid)",
+    after_help = "Run `webolator skill` to print a Claude Code skill that describes this tool."
 )]
 struct Cli {
     /// Markdown file or directory
@@ -3170,7 +3171,59 @@ fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(
 
 // ---------------------------------------------------------------- main
 
+const SKILL: &str = include_str!("skill.md");
+
+/// `webolator skill [--install] [--project]`: prints the Claude Code skill, or writes it
+/// to ~/.claude/skills/webolator/ (or ./.claude/skills/webolator/ with --project).
+fn skill_command(args: &[String]) -> Result<(), String> {
+    let mut install = false;
+    let mut project = false;
+    for a in args {
+        match a.as_str() {
+            "--install" => install = true,
+            "--project" => project = true,
+            "-h" | "--help" => {
+                println!(
+                    "Print the webolator skill (SKILL.md) for Claude Code.\n\n\
+                     Usage: webolator skill [--install [--project]]\n\n\
+                     \x20     --install   Write it to ~/.claude/skills/webolator/SKILL.md\n\
+                     \x20     --project   With --install: write to ./.claude/skills/webolator/ instead"
+                );
+                return Ok(());
+            }
+            other => return Err(format!("skill: unknown option {other}")),
+        }
+    }
+    if project && !install {
+        return Err("skill: --project needs --install".into());
+    }
+    if !install {
+        print!("{SKILL}");
+        return Ok(());
+    }
+    let base = if project {
+        PathBuf::from(".")
+    } else {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .ok_or("skill: can't find the home folder")?
+    };
+    let dir = base.join(".claude/skills/webolator");
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let file = dir.join("SKILL.md");
+    fs::write(&file, SKILL).map_err(|e| format!("{}: {e}", file.display()))?;
+    eprintln!("wrote {}", file.display());
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
+    // `skill` is a subcommand only when it is the first argument; a folder of that
+    // name can still be given as ./skill.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("skill") {
+        return skill_command(&args[1..]);
+    }
     let cli = Cli::parse();
     let opts = BuildOpts {
         mermaid_js: cli.mermaid_js.clone(),
@@ -3253,6 +3306,12 @@ mod tests {
         assert_eq!(c.url.as_deref(), Some("https://a.b/c"));
         assert_eq!(c.logo.as_deref(), Some("l.svg"));
         assert_eq!(c.nav.unwrap().len(), 4);
+    }
+
+    #[test]
+    fn skill_has_frontmatter() {
+        assert!(SKILL.starts_with("---\nname: webolator\n"));
+        assert!(SKILL.contains("description:"));
     }
 
     #[test]
