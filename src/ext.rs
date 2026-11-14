@@ -78,10 +78,9 @@ fn marker(line: &str) -> Option<Marker> {
         (true, true, r)
     } else if let Some(r) = t.strip_prefix("???") {
         (true, false, r)
-    } else if let Some(r) = t.strip_prefix("!!!") {
-        (false, false, r)
     } else {
-        return None;
+        let r = t.strip_prefix("!!!")?;
+        (false, false, r)
     };
     if !rest.starts_with(' ') {
         return None;
@@ -169,24 +168,23 @@ fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String>
             }
         }
         let pad = " ".repeat(indent_of(line));
-        if let Some(rest) = t.strip_prefix("--8<--") {
-            if let Some((path, _)) = quoted(rest) {
-                let path = path.split(':').next().unwrap_or(path);
-                if depth < MAX_DEPTH {
-                    if let Some(text) = [base, root]
-                        .iter()
-                        .map(|d| d.join(path))
-                        .find(|p| p.is_file())
-                        .and_then(|p| std::fs::read_to_string(p).ok())
-                    {
-                        let inner: Vec<String> = text.lines().map(String::from).collect();
-                        for l in process(&inner, base, root, depth + 1) {
-                            out.push(if l.is_empty() { l } else { format!("{pad}{l}") });
-                        }
-                        i += 1;
-                        continue;
-                    }
+        if let Some(rest) = t.strip_prefix("--8<--")
+            && let Some((path, _)) = quoted(rest)
+        {
+            let path = path.split(':').next().unwrap_or(path);
+            if depth < MAX_DEPTH
+                && let Some(text) = [base, root]
+                    .iter()
+                    .map(|d| d.join(path))
+                    .find(|p| p.is_file())
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+            {
+                let inner: Vec<String> = text.lines().map(String::from).collect();
+                for l in process(&inner, base, root, depth + 1) {
+                    out.push(if l.is_empty() { l } else { format!("{pad}{l}") });
                 }
+                i += 1;
+                continue;
             }
         }
         let indent = indent_of(line);

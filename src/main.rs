@@ -181,6 +181,8 @@ struct Config {
     logo: Option<String>,
     favicon: Option<String>,
     docs_dir: Option<String>,
+    /// Explicit sidebar, as in `nav = [...]`.
+    nav: Option<Vec<NavItem>>,
     /// The file the settings came from.
     path: Option<PathBuf>,
 }
@@ -209,8 +211,88 @@ fn parse_config(text: &str) -> Result<Config, String> {
         logo: theme.and_then(|t| get(t, "logo")),
         favicon: theme.and_then(|t| get(t, "favicon")),
         docs_dir: get(proj, "docs_dir"),
+        nav: proj
+            .get("nav")
+            .and_then(|v| v.as_array())
+            .map(|a| parse_nav(a)),
         path: None,
     })
+}
+
+/// One entry of an explicit `nav`.
+#[derive(Clone)]
+enum NavItem {
+    /// A page: its label (None = the page title) and file, relative to the site folder.
+    Page(Option<String>, String),
+    Link(String, String),
+    Section(String, Vec<NavItem>),
+}
+
+/// `nav = ["a.md", { "Title" = "b.md" }, { "Section" = [ ... ] }, { "Site" = "https://..." }]`
+fn parse_nav(items: &[toml::Value]) -> Vec<NavItem> {
+    let mut out = Vec::new();
+    for item in items {
+        match item {
+            toml::Value::String(s) if has_scheme(s) => {
+                out.push(NavItem::Link(s.clone(), s.clone()))
+            }
+            toml::Value::String(s) => out.push(NavItem::Page(None, s.clone())),
+            toml::Value::Table(t) => {
+                for (label, v) in t {
+                    match v {
+                        toml::Value::String(s) if has_scheme(s) => {
+                            out.push(NavItem::Link(label.clone(), s.clone()))
+                        }
+                        toml::Value::String(s) => {
+                            out.push(NavItem::Page(Some(label.clone()), s.clone()))
+                        }
+                        toml::Value::Array(a) => {
+                            out.push(NavItem::Section(label.clone(), parse_nav(a)))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Keeps the pages that exist in the site (warning about the rest) and applies labels as titles.
+fn resolve_nav(items: &[NavItem], entries: &mut BTreeMap<String, Entry>) -> Vec<NavItem> {
+    let mut out = Vec::new();
+    for item in items {
+        match item {
+            NavItem::Page(label, path) => {
+                let key = path.trim_start_matches("./").trim_start_matches('/');
+                match entries.get_mut(key) {
+                    Some(e) => {
+                        if let Some(l) = label {
+                            e.title = l.clone();
+                        }
+                        out.push(NavItem::Page(label.clone(), key.to_string()));
+                    }
+                    None => print_warning("nav", &format!("{path}: no such file in the site")),
+                }
+            }
+            NavItem::Link(..) => out.push(item.clone()),
+            NavItem::Section(label, sub) => {
+                out.push(NavItem::Section(label.clone(), resolve_nav(sub, entries)))
+            }
+        }
+    }
+    out
+}
+
+fn nav_pages(items: &[NavItem], out: &mut Vec<String>) {
+    for item in items {
+        match item {
+            NavItem::Page(_, k) => out.push(k.clone()),
+            NavItem::Link(..) => {}
+            NavItem::Section(_, sub) => nav_pages(sub, out),
+        }
+    }
 }
 
 /// Finds the config next to the input (or in its parent folder, the usual place
@@ -270,6 +352,8 @@ struct Site {
     root: PathBuf,
     title: String,
     config: Config,
+    /// Explicit sidebar from the config, with missing pages dropped.
+    nav: Option<Vec<NavItem>>,
     /// Source files, keyed by '/'-separated path relative to root.
     entries: BTreeMap<String, Entry>,
     /// Directories ("" is root) that get an index.
@@ -421,6 +505,19 @@ impl Site {
 
     /// Every page we render, in sidebar order: each folder's index, then its contents.
     fn reading_order(&self) -> Vec<Doc> {
+        if let Some(nav) = &self.nav {
+            let mut keys = Vec::new();
+            nav_pages(nav, &mut keys);
+            let mut v = Vec::new();
+            // The home page comes first unless the nav places it.
+            match self.dirs.get("") {
+                Some(DirIndex::Entry(k)) if !keys.contains(k) => v.push(Doc::Entry(k.clone())),
+                Some(DirIndex::Generated) => v.push(Doc::Listing(String::new())),
+                _ => {}
+            }
+            v.extend(keys.into_iter().map(Doc::Entry));
+            return v;
+        }
         fn walk(site: &Site, dir: &str, out: &mut Vec<Doc>) {
             match site.dirs.get(dir) {
                 Some(DirIndex::Entry(k)) if site.entries[k].kind == Kind::Page => {
@@ -834,10 +931,12 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
             .unwrap_or("Docs".into()),
     };
     let git = if scan.git { git_info(&root) } else { None };
+    let nav = config.nav.as_ref().map(|n| resolve_nav(n, &mut entries));
     Ok(Site {
         root,
         title,
         config,
+        nav,
         entries,
         dirs,
         out,
@@ -1656,13 +1755,13 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
         let mut title = String::new();
         if let NodeValue::CodeBlock(cb) = &mut node.data.borrow_mut().value {
             let info = cb.info.clone();
-            if let Some((before, rest)) = info.split_once("title=\"") {
-                if let Some((t, after)) = rest.split_once('"') {
-                    title = t.to_string();
-                    cb.info = format!("{} {}", before.trim(), after.trim())
-                        .trim()
-                        .to_string();
-                }
+            if let Some((before, rest)) = info.split_once("title=\"")
+                && let Some((t, after)) = rest.split_once('"')
+            {
+                title = t.to_string();
+                cb.info = format!("{} {}", before.trim(), after.trim())
+                    .trim()
+                    .to_string();
             }
         }
         if !title.is_empty() {
@@ -2261,10 +2360,41 @@ fn render_nav(ctx: &Ctx, active: Option<&str>) -> String {
         // The logo goes inside the link, before the name.
         root.replacen('>', &format!(">{logo}"), 1)
     };
+    let tree = match &site.nav {
+        Some(items) => nav_items(site, items, &link),
+        None => nav_dir(site, "", &link),
+    };
     format!(
-        "<div class=\"nav-head\">{root}<button class=\"menu-toggle\" aria-label=\"Menu\" aria-expanded=\"false\">☰</button>{THEME_BUTTON}</div>\n{}",
-        nav_dir(site, "", &link)
+        "<div class=\"nav-head\">{root}<button class=\"menu-toggle\" aria-label=\"Menu\" aria-expanded=\"false\">☰</button>{THEME_BUTTON}</div>\n{tree}"
     )
+}
+
+/// Sidebar for an explicit `nav`.
+fn nav_items(
+    site: &Site,
+    items: &[NavItem],
+    link: &dyn Fn(&str, bool, &str, &str) -> String,
+) -> String {
+    let mut h = String::from("<ul>\n");
+    for item in items {
+        match item {
+            NavItem::Page(_, k) => {
+                let e = &site.entries[k];
+                h += &format!("<li>{}</li>\n", link(k, false, &e.title, &tag(k, e.kind)));
+            }
+            NavItem::Link(label, url) => {
+                h += &format!("<li><a href=\"{}\">{} ↗</a></li>\n", esc(url), esc(label));
+            }
+            NavItem::Section(label, sub) => {
+                h += &format!(
+                    "<li><details open><summary><span>{}</span></summary>\n{}</details></li>\n",
+                    esc(label),
+                    nav_items(site, sub, link)
+                );
+            }
+        }
+    }
+    h + "</ul>\n"
 }
 
 fn nav_dir(site: &Site, dir: &str, link: &dyn Fn(&str, bool, &str, &str) -> String) -> String {
@@ -2525,7 +2655,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             "404.html",
             "404.html",
             "Page not found",
-            Doc::Listing("\0404".into()),
+            Doc::Listing("<404>".into()),
             &(base + "<meta name=\"robots\" content=\"noindex\">\n"),
             &|ctx| {
                 let home = ctx.href("", true, None).unwrap_or_default();

@@ -228,3 +228,4 @@ details.admonition[open] > summary { margin-bottom: .4em; }
   background: var(--side); border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0;
 }
 .code-title + pre { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+nav.side summary > span { flex: 1; min-width: 0; padding: 3px 8px; font-weight: 600; }
