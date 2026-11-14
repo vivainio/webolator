@@ -229,3 +229,16 @@ details.admonition[open] > summary { margin-bottom: .4em; }
 }
 .code-title + pre { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
 nav.side summary > span { flex: 1; min-width: 0; padding: 3px 8px; font-weight: 600; }
+.search { position: relative; margin: 6px 0 10px; }
+.search input {
+  width: 100%; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--fg); font: inherit; font-size: 14px;
+}
+.search input:focus { outline: 2px solid var(--link); outline-offset: -1px; }
+nav.side .search .results {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 20; margin: 4px 0 0; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+nav.side .search .results a { white-space: normal; padding: 5px 8px; }
+nav.side .search .results a.active { background: var(--active); color: var(--link); font-weight: normal; }
+.search .results .none { padding: 6px 8px; color: var(--muted); font-size: 13px; }

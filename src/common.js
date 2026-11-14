@@ -59,6 +59,103 @@
     select(0);
   }
 
+  // ---- search: prefix matching over a small word index, loaded on first use
+  const box = document.querySelector('.search input');
+  if (box) {
+    const list = box.parentElement.querySelector('.results');
+    // Single-file output embeds the index in a script that comes after this one.
+    const embeddedEl = () => document.getElementById('webolator-search');
+    let index = null, loading = null, active = -1;
+    const load = () => (loading ||= new Promise((resolve) => {
+      if (embeddedEl()) { index = JSON.parse(embeddedEl().textContent); return resolve(); }
+      const s = document.createElement('script');
+      s.src = box.dataset.index;
+      s.onload = () => { index = window.WEBOLATOR_SEARCH; resolve(); };
+      s.onerror = () => resolve();
+      document.head.appendChild(s);
+    }).then(() => {
+      if (index) index.s.forEach((x) => { x.w = ' ' + x[3]; x.h = ' ' + x[2].toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' '); });
+    }));
+    // "installation" should still find "install"
+    const stems = (w) => {
+      const out = [w];
+      for (const suf of ['ations', 'ation', 'ings', 'ing', 'ed', 'es', 's'])
+        if (w.endsWith(suf) && w.length - suf.length >= 3) { out.push(w.slice(0, -suf.length)); break; }
+      return out;
+    };
+    const search = (q) => {
+      const terms = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(stems);
+      if (!terms.length || !index) return [];
+      const res = [];
+      for (const s of index.s) {
+        let score = 0;
+        for (const t of terms) {
+          let best = 0;
+          for (const w of t) {
+            if (s.h.includes(' ' + w)) best = Math.max(best, 3);
+            else if (s.w.includes(' ' + w)) best = Math.max(best, 1);
+          }
+          if (!best) { score = 0; break; }
+          score += best;
+        }
+        if (score) res.push([score + (s[1] === '' || s[2] === index.p[s[0]][0] ? 2 : 0), s]);
+      }
+      return res.sort((a, b) => b[0] - a[0]).slice(0, 8).map((r) => r[1]);
+    };
+    const href = (s) => {
+      const [title, target] = index.p[s[0]];
+      if (embeddedEl()) return '#' + target + (s[1] ? '--' + s[1] : '');
+      const base = box.dataset.index.slice(0, -'_webolator/search.js'.length);
+      return base + target + (s[1] ? '#' + s[1] : '');
+    };
+    const render = (hits) => {
+      list.textContent = '';
+      active = -1;
+      for (const s of hits) {
+        const title = index.p[s[0]][0];
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = href(s);
+        a.textContent = s[2] && s[2] !== title ? title + ' › ' + s[2] : title;
+        li.appendChild(a);
+        list.appendChild(li);
+      }
+      if (!hits.length && box.value.trim()) {
+        const li = document.createElement('li');
+        li.className = 'none';
+        li.textContent = 'No results';
+        list.appendChild(li);
+      }
+      list.hidden = !list.children.length;
+    };
+    const close = () => { list.hidden = true; box.value = ''; active = -1; };
+    box.addEventListener('focus', load);
+    box.addEventListener('input', async () => { await load(); render(search(box.value)); });
+    const move = (d) => {
+      const items = [...list.querySelectorAll('a')];
+      if (!items.length) return;
+      active = (active + d + items.length) % items.length;
+      items.forEach((a, i) => a.classList.toggle('active', i === active));
+    };
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+      else if (e.key === 'Escape') { close(); box.blur(); }
+      else if (e.key === 'Enter') {
+        const a = list.querySelectorAll('a')[Math.max(active, 0)];
+        if (a) { a.click(); }
+      }
+    });
+    list.addEventListener('click', (e) => { if (e.target.closest('a')) setTimeout(close, 0); });
+    document.addEventListener('click', (e) => { if (!box.parentElement.contains(e.target)) list.hidden = true; });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) {
+        e.preventDefault();
+        box.focus();
+      }
+    });
+  }
+
   // ---- mobile menu
   const nav = document.querySelector('nav.side');
   const menu = document.querySelector('.menu-toggle');

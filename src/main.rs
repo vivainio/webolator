@@ -2,6 +2,7 @@
 //! No config, no index files. Mermaid is rendered client-side.
 
 mod ext;
+mod search;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -181,6 +182,8 @@ struct Config {
     logo: Option<String>,
     favicon: Option<String>,
     docs_dir: Option<String>,
+    /// `search = false` turns the search box and index off.
+    no_search: bool,
     /// Explicit sidebar, as in `nav = [...]`.
     nav: Option<Vec<NavItem>>,
     /// The file the settings came from.
@@ -211,6 +214,7 @@ fn parse_config(text: &str) -> Result<Config, String> {
         logo: theme.and_then(|t| get(t, "logo")),
         favicon: theme.and_then(|t| get(t, "favicon")),
         docs_dir: get(proj, "docs_dir"),
+        no_search: proj.get("search").and_then(|v| v.as_bool()) == Some(false),
         nav: proj
             .get("nav")
             .and_then(|v| v.as_array())
@@ -2417,8 +2421,20 @@ fn render_nav(ctx: &Ctx, active: Option<&str>) -> String {
         Some(items) => nav_items(site, items, &link),
         None => nav_dir(site, "", &link),
     };
+    let search = if site.config.no_search {
+        String::new()
+    } else {
+        let src = match ctx.mode {
+            Mode::Static => rel_href(&ctx.from_out, "_webolator/search.js"),
+            Mode::Single => String::new(),
+        };
+        format!(
+            "<div class=\"search\"><input type=\"search\" placeholder=\"Search\" aria-label=\"Search\" autocomplete=\"off\" data-index=\"{}\"><ul class=\"results\" hidden></ul></div>\n",
+            esc(&src)
+        )
+    };
     format!(
-        "<div class=\"nav-head\">{root}<button class=\"menu-toggle\" aria-label=\"Menu\" aria-expanded=\"false\">☰</button>{THEME_BUTTON}</div>\n{tree}"
+        "<div class=\"nav-head\">{root}<button class=\"menu-toggle\" aria-label=\"Menu\" aria-expanded=\"false\">☰</button>{THEME_BUTTON}</div>\n{search}{tree}"
     )
 }
 
@@ -2603,6 +2619,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         t
     };
 
+    let index = RefCell::new(search::SearchIndex::default());
     let order = site.reading_order();
     let render = |from_out: &str,
                   from_label: &str,
@@ -2661,7 +2678,11 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         let out = &site.out[k];
         if e.kind == Kind::Page {
             render(out, k, &e.title, Doc::Entry(k.clone()), "", &|ctx| {
-                render_markdown(ctx, k)
+                let html = render_markdown(ctx, k);
+                if !e.hidden {
+                    index.borrow_mut().add_page(&e.title, out, &html, "");
+                }
+                html
             })?;
         } else {
             write(out, &fs::read(site.root.join(k)).map_err(io)?)?;
@@ -2695,6 +2716,12 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             }
             DirIndex::Entry(_) => {}
         }
+    }
+    if !site.config.no_search {
+        write(
+            "_webolator/search.js",
+            format!("window.WEBOLATOR_SEARCH={};\n", index.borrow().to_json()).as_bytes(),
+        )?;
     }
     // 404.html unless the site has its own. Hosts serve it at any depth, so links are
     // made absolute with <base> when we know where the site lives.
@@ -2773,6 +2800,7 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         warnings: &warnings,
         thumbs: &thumbs,
     };
+    let index = RefCell::new(search::SearchIndex::default());
     let order = site.reading_order();
     let section = |id: &str, title: &str, doc: Doc, inner: &str| {
         let key = match &doc {
@@ -2805,7 +2833,15 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
     for (k, e) in &site.entries {
         let id = site.entry_id(k);
         let inner = match e.kind {
-            Kind::Page => render_markdown(&ctx_for(id.clone()), k),
+            Kind::Page => {
+                let html = render_markdown(&ctx_for(id.clone()), k);
+                if !e.hidden {
+                    index
+                        .borrow_mut()
+                        .add_page(&e.title, &id, &html, &format!("{id}--"));
+                }
+                html
+            }
             Kind::Text => format!(
                 "<h1>{}</h1>\n<pre class=\"file\">{}</pre>\n",
                 esc(file_name(k)),
@@ -2846,8 +2882,16 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
     }
     asset_json += "}";
 
+    let search_json = if site.config.no_search {
+        String::new()
+    } else {
+        format!(
+            "<script type=\"application/json\" id=\"webolator-search\">{}</script>\n",
+            index.borrow().to_json().replace("</", "<\\/")
+        )
+    };
     let mut tail = format!(
-        "<script type=\"application/json\" id=\"webolator-assets\">{}</script>\n<script>const WEBOLATOR_FIRST = {};\n{SINGLE_JS}</script>\n",
+        "{search_json}<script type=\"application/json\" id=\"webolator-assets\">{}</script>\n<script>const WEBOLATOR_FIRST = {};\n{SINGLE_JS}</script>\n",
         asset_json.replace("</", "<\\/"),
         json_str(&site.dir_id(""))
     );
