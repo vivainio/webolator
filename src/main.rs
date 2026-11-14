@@ -1,6 +1,8 @@
 //! webolator: turn a markdown file or a folder of markdown into a browsable site.
 //! No config, no index files. Mermaid is rendered client-side.
 
+mod ext;
+
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -11,7 +13,7 @@ use std::time::{Duration, SystemTime};
 
 use base64::Engine;
 use clap::Parser;
-use comrak::nodes::{AstNode, NodeHtmlBlock, NodeValue};
+use comrak::nodes::{Ast, AstNode, NodeHtmlBlock, NodeValue};
 use comrak::options::Plugins;
 use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
 use comrak::{Arena, Options, format_html_with_plugins, parse_document};
@@ -1595,6 +1597,7 @@ fn take_hero<'a>(ctx: &Ctx, key: &str, doc: &'a AstNode<'a>) -> String {
 
 fn render_markdown(ctx: &Ctx, key: &str) -> String {
     let md = read_lossy(&ctx.site.root.join(key));
+    let md = ext::preprocess(&md, &ctx.site.root.join(parent_dir(key)), &ctx.site.root);
     let prefix = match ctx.mode {
         Mode::Static => String::new(),
         Mode::Single => format!("{}--", ctx.from_id),
@@ -1642,6 +1645,35 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
         };
         if let Some(r) = replacement {
             data.value = r;
+        }
+    }
+    // ```lang title="file.py": the title goes in a bar above the block.
+    let titled: Vec<_> = doc
+        .descendants()
+        .filter(|n| matches!(&n.data.borrow().value, NodeValue::CodeBlock(cb) if cb.info.contains("title=\"")))
+        .collect();
+    for node in titled {
+        let mut title = String::new();
+        if let NodeValue::CodeBlock(cb) = &mut node.data.borrow_mut().value {
+            let info = cb.info.clone();
+            if let Some((before, rest)) = info.split_once("title=\"") {
+                if let Some((t, after)) = rest.split_once('"') {
+                    title = t.to_string();
+                    cb.info = format!("{} {}", before.trim(), after.trim())
+                        .trim()
+                        .to_string();
+                }
+            }
+        }
+        if !title.is_empty() {
+            let bar = arena.alloc(AstNode::new(std::cell::RefCell::new(Ast::new(
+                NodeValue::HtmlBlock(NodeHtmlBlock {
+                    block_type: 6,
+                    literal: format!("<div class=\"code-title\">{}</div>\n", esc(&title)),
+                }),
+                (0, 0).into(),
+            ))));
+            node.insert_before(bar);
         }
     }
     let mut plugins = Plugins::default();

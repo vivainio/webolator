@@ -31,6 +31,34 @@
     });
   }
 
+
+  // ---- content tabs: build the tab bar (without JS every panel just shows)
+  for (const group of document.querySelectorAll('.tabbed:not([data-ready])')) {
+    group.dataset.ready = '1';
+    const tabs = [...group.children].filter((c) => c.classList.contains('tab'));
+    const bar = document.createElement('div');
+    bar.className = 'tab-bar';
+    bar.setAttribute('role', 'tablist');
+    const select = (i) => {
+      tabs.forEach((t, k) => {
+        t.hidden = k !== i;
+        bar.children[k].classList.toggle('active', k === i);
+        bar.children[k].setAttribute('aria-selected', k === i);
+      });
+      webolatorMermaidRun(tabs[i]);
+    };
+    tabs.forEach((t, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.textContent = t.dataset.title || 'Tab ' + (i + 1);
+      b.addEventListener('click', () => select(i));
+      bar.appendChild(b);
+    });
+    group.insertBefore(bar, group.firstChild);
+    select(0);
+  }
+
   // ---- mobile menu
   const nav = document.querySelector('nav.side');
   const menu = document.querySelector('.menu-toggle');

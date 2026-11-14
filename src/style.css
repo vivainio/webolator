@@ -202,3 +202,29 @@ nav.side img.logo { height: 22px; width: auto; vertical-align: -5px; margin-righ
 .card p { margin: 0; font-size: 14px; color: var(--muted); }
 ul.listing .desc { color: var(--muted); font-size: 14px; }
 ul.listing .desc::before { content: "— "; }
+.tabbed { margin: 1em 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tab-bar { display: flex; gap: 2px; overflow-x: auto; background: var(--side); border-bottom: 1px solid var(--border); }
+.tab-bar button {
+  border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted);
+  padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap;
+}
+.tab-bar button:hover { color: var(--fg); }
+.tab-bar button.active { color: var(--link); border-bottom-color: var(--link); font-weight: 600; }
+.tab { padding: 4px 16px; }
+.tab > pre:first-child { margin-top: 12px; }
+.tab > :last-child { margin-bottom: 12px; }
+.tabbed:not([data-ready]) .tab::before { content: attr(data-title); display: block; font-weight: 600; margin-top: 8px; }
+.admonition { padding: .5em 1em; margin: 0 0 1em; border-left: .25em solid var(--note); background: var(--code-bg); border-radius: 0 6px 6px 0; }
+.admonition > :last-child { margin-bottom: 0; }
+.admonition-title, .admonition > summary { font-weight: 600; color: var(--note); margin: 0 0 .4em; }
+details.admonition > summary { cursor: pointer; margin: 0; }
+details.admonition[open] > summary { margin-bottom: .4em; }
+.admonition.tip { border-color: var(--tip); } .admonition.tip > .admonition-title, .admonition.tip > summary { color: var(--tip); }
+.admonition.important { border-color: var(--important); } .admonition.important > .admonition-title, .admonition.important > summary { color: var(--important); }
+.admonition.warning { border-color: var(--warning); } .admonition.warning > .admonition-title, .admonition.warning > summary { color: var(--warning); }
+.admonition.caution { border-color: var(--caution); } .admonition.caution > .admonition-title, .admonition.caution > summary { color: var(--caution); }
+.code-title {
+  margin: 1em 0 0; padding: 4px 12px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+  background: var(--side); border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0;
+}
+.code-title + pre { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
