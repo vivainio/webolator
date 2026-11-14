@@ -16,7 +16,7 @@ Turn a folder of markdown, or a single `.md` file, into a browsable website. No 
   See the [syntax reference](https://vivainio.github.io/webolator/syntax.html) for every supported form.
 - **`--check`** fails the build on broken links, for CI.
 - **`--files assets/`** shows a folder as a plain file list (name, size, date) instead of rendering it. Useful for downloads and attachments.
-- **`--gallery screenshots/`** shows a folder of images as a thumbnail grid with click-to-zoom.
+- **`--gallery screenshots/`** shows a folder of images as a thumbnail grid with click-to-zoom. To put a gallery in the middle of a page, use a ```` ```gallery ```` fence listing a folder, files or a glob.
 - **Custom CSS.** A `webolator.css` in the docs root is applied automatically, or you can pass `--css file.css`. Colors are CSS variables, so a theme can be a few lines. See [styling](https://vivainio.github.io/webolator/features/styling.html).
 - **Search.** A small client-side index (about 16 KB for these docs), loaded only when you click the search box. Prefix matching, no typo tolerance.
 - **Optional config.** A `webolator.toml` or `zensical.toml` sets the site name, description, URL, logo, favicon, footer and an explicit `nav`. See [config](https://vivainio.github.io/webolator/features/config.html).

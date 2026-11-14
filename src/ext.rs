@@ -6,6 +6,8 @@
 //! - admonitions:    `!!! note "Title"` plus an indented body
 //! - collapsible:    `??? note "Title"` (`???+` starts open)
 //! - snippets:       `--8<-- "path/to/file"` includes another file
+//! - galleries:      a gallery fence listing folders, files or globs; each becomes a
+//!   `<!--gallery:N-->` marker that the renderer swaps for a thumbnail grid
 //!
 //! Bodies are indented four spaces more than their marker line. Fenced code blocks
 //! are passed through untouched.
@@ -142,7 +144,13 @@ fn body(lines: &[String], i: usize, indent: usize) -> (Vec<String>, usize) {
     (b, end)
 }
 
-fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String> {
+fn process(
+    lines: &[String],
+    base: &Path,
+    root: &Path,
+    depth: u8,
+    gal: &mut Vec<Vec<String>>,
+) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut fence: Option<(char, usize)> = None;
     let mut i = 0;
@@ -161,6 +169,32 @@ fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String>
         if let Some(c) = t.chars().next().filter(|c| *c == '`' || *c == '~') {
             let run = t.chars().take_while(|x| *x == c).count();
             if run >= 3 {
+                if t[run..].split_whitespace().next() == Some("gallery") {
+                    // The body lists what to show; it is not rendered as code.
+                    let mut j = i + 1;
+                    while j < lines.len() {
+                        let l = lines[j].trim_start();
+                        let r = l.chars().take_while(|x| *x == c).count();
+                        if r >= run && l[r..].trim().is_empty() {
+                            break;
+                        }
+                        j += 1;
+                    }
+                    let spec = lines[i + 1..j.min(lines.len())]
+                        .iter()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                        .collect();
+                    out.push(format!(
+                        "{}<!--gallery:{}-->",
+                        " ".repeat(indent_of(line)),
+                        gal.len()
+                    ));
+                    out.push(String::new());
+                    gal.push(spec);
+                    i = j + 1;
+                    continue;
+                }
                 fence = Some((c, run));
                 out.push(line.clone());
                 i += 1;
@@ -180,7 +214,7 @@ fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String>
                     .and_then(|p| std::fs::read_to_string(p).ok())
             {
                 let inner: Vec<String> = text.lines().map(String::from).collect();
-                for l in process(&inner, base, root, depth + 1) {
+                for l in process(&inner, base, root, depth + 1, gal) {
                     out.push(if l.is_empty() { l } else { format!("{pad}{l}") });
                 }
                 i += 1;
@@ -206,7 +240,7 @@ fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String>
                         esc(&title)
                     ));
                     out.push(String::new());
-                    for l in process(&b, base, root, depth) {
+                    for l in process(&b, base, root, depth, gal) {
                         out.push(if l.is_empty() { l } else { format!("{pad}{l}") });
                     }
                     out.push(String::new());
@@ -250,7 +284,7 @@ fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String>
                     }
                 }
                 out.push(String::new());
-                for l in process(&b, base, root, depth) {
+                for l in process(&b, base, root, depth, gal) {
                     out.push(if l.is_empty() { l } else { format!("{pad}{l}") });
                 }
                 out.push(String::new());
@@ -274,18 +308,25 @@ fn process(lines: &[String], base: &Path, root: &Path, depth: u8) -> Vec<String>
 }
 
 /// Expands the extensions in `md`. `base` is the folder of the page (for snippet
-/// paths); `root` is the site folder.
-pub fn preprocess(md: &str, base: &Path, root: &Path) -> String {
+/// paths); `root` is the site folder. Also returns the specs of the page's gallery
+/// blocks, in order (the `<!--gallery:N-->` markers).
+pub fn preprocess(md: &str, base: &Path, root: &Path) -> (String, Vec<Vec<String>>) {
     // Cheap exit for pages that use none of this.
-    if !(md.contains("===") || md.contains("!!!") || md.contains("???") || md.contains("--8<--")) {
-        return md.to_string();
+    if !(md.contains("===")
+        || md.contains("!!!")
+        || md.contains("???")
+        || md.contains("--8<--")
+        || md.contains("gallery"))
+    {
+        return (md.to_string(), Vec::new());
     }
     let lines: Vec<String> = md.lines().map(String::from).collect();
-    let mut s = process(&lines, base, root, 0).join("\n");
+    let mut gal = Vec::new();
+    let mut s = process(&lines, base, root, 0, &mut gal).join("\n");
     if md.ends_with('\n') {
         s.push('\n');
     }
-    s
+    (s, gal)
 }
 
 #[cfg(test)]
@@ -293,7 +334,7 @@ mod tests {
     use super::*;
 
     fn run(md: &str) -> String {
-        preprocess(md, Path::new("."), Path::new("."))
+        preprocess(md, Path::new("."), Path::new(".")).0
     }
 
     #[test]
@@ -311,6 +352,20 @@ mod tests {
         assert!(out.contains("<p class=\"admonition-title\">Tip</p>"));
         assert!(out.contains("<details class=\"admonition caution danger\" open>"));
         assert!(out.contains("<summary>Oh no</summary>"));
+    }
+
+    #[test]
+    fn gallery_block_becomes_marker() {
+        let (out, gal) = preprocess(
+            "before\n\n```gallery\nshots/\n# comment\nimg/*.png\n```\n\nafter\n",
+            Path::new("."),
+            Path::new("."),
+        );
+        assert!(out.contains("<!--gallery:0-->") && !out.contains("shots/"));
+        assert_eq!(
+            gal,
+            vec![vec!["shots/".to_string(), "img/*.png".to_string()]]
+        );
     }
 
     #[test]

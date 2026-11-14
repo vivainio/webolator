@@ -343,6 +343,8 @@ struct Entry {
     description: String,
     /// All front matter `key: value` pairs.
     fm: BTreeMap<String, String>,
+    /// Images of each gallery block on the page, as site keys.
+    galleries: Vec<Vec<String>>,
 }
 
 enum DirIndex {
@@ -367,6 +369,8 @@ struct Site {
     git: Option<GitInfo>,
     /// --gallery folders, relative to root.
     gallery: Vec<String>,
+    /// Images used by ```gallery blocks (they get thumbnails too).
+    inline_images: BTreeSet<String>,
 }
 
 /// A page in reading order (sidebar order, depth first).
@@ -775,6 +779,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                 hidden: true,
                 description: String::new(),
                 fm: BTreeMap::new(),
+                galleries: Vec::new(),
             }
         } else if kind == Kind::Page {
             let m = page_meta(&read_lossy(&root.join(&k)));
@@ -787,6 +792,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                 hidden: m.hidden,
                 description: m.description,
                 fm: m.fm,
+                galleries: Vec::new(),
             }
         } else {
             Entry {
@@ -796,9 +802,41 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
                 hidden: false,
                 description: String::new(),
                 fm: BTreeMap::new(),
+                galleries: Vec::new(),
             }
         };
         entries.insert(k, entry);
+    }
+    // ```gallery blocks: which images each one shows.
+    let mut inline_images = BTreeSet::new();
+    let page_keys: Vec<String> = entries
+        .iter()
+        .filter(|(_, e)| e.kind == Kind::Page)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in page_keys {
+        let dir = parent_dir(&k);
+        let (_, specs) = ext::preprocess(&read_lossy(&root.join(&k)), &root.join(dir), &root);
+        let resolved: Vec<Vec<String>> = specs
+            .iter()
+            .map(|block| {
+                let mut imgs: Vec<String> = Vec::new();
+                for spec in block {
+                    let found = resolve_gallery(&entries, dir, spec);
+                    if found.is_empty() {
+                        print_warning(&k, &format!("gallery {spec}: no images found"));
+                    }
+                    for f in found {
+                        if !imgs.contains(&f) {
+                            imgs.push(f);
+                        }
+                    }
+                }
+                inline_images.extend(imgs.iter().cloned());
+                imgs
+            })
+            .collect();
+        entries.get_mut(&k).unwrap().galleries = resolved;
     }
     if files_dirs.is_empty() && !entries.values().any(|e| e.kind == Kind::Page) {
         return Err(format!("no markdown files found in {}", root.display()));
@@ -946,6 +984,7 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
         out,
         git,
         gallery: gallery_dirs,
+        inline_images,
     })
 }
 
@@ -1700,7 +1739,7 @@ fn take_hero<'a>(ctx: &Ctx, key: &str, doc: &'a AstNode<'a>) -> String {
 
 fn render_markdown(ctx: &Ctx, key: &str) -> String {
     let md = read_lossy(&ctx.site.root.join(key));
-    let md = ext::preprocess(&md, &ctx.site.root.join(parent_dir(key)), &ctx.site.root);
+    let (md, _) = ext::preprocess(&md, &ctx.site.root.join(parent_dir(key)), &ctx.site.root);
     let prefix = match ctx.mode {
         Mode::Static => String::new(),
         Mode::Single => format!("{}--", ctx.from_id),
@@ -1783,6 +1822,15 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
     plugins.render.codefence_syntax_highlighter = Some(highlighter());
     let mut html = String::new();
     format_html_with_plugins(doc, &opts, &mut html, &plugins).expect("html formatting");
+    if let Some(e) = ctx.site.entries.get(key) {
+        for (n, keys) in e.galleries.iter().enumerate() {
+            let images: Vec<&String> = keys.iter().collect();
+            html = html.replace(
+                &format!("<!--gallery:{n}-->"),
+                &render_gallery(ctx, &images),
+            );
+        }
+    }
     if home {
         // Section cards for the folder this page is the index of.
         let cards = ctx
@@ -2155,6 +2203,72 @@ struct Thumb {
     ext: &'static str,
 }
 
+/// `*` and `?` wildcards, case-insensitive.
+fn glob_match(pat: &str, name: &str) -> bool {
+    fn go(p: &[char], n: &[char]) -> bool {
+        match p.first() {
+            None => n.is_empty(),
+            Some('*') => (0..=n.len()).any(|i| go(&p[1..], &n[i..])),
+            Some('?') => !n.is_empty() && go(&p[1..], &n[1..]),
+            Some(c) => n.first() == Some(c) && go(&p[1..], &n[1..]),
+        }
+    }
+    let p: Vec<char> = pat.to_lowercase().chars().collect();
+    let n: Vec<char> = name.to_lowercase().chars().collect();
+    go(&p, &n)
+}
+
+/// `path` joined onto `from_dir` with "." and ".." applied; None if it climbs above the root.
+fn norm_path(from_dir: &str, path: &str) -> Option<String> {
+    let mut parts: Vec<&str> = if path.starts_with('/') {
+        vec![]
+    } else {
+        from_dir.split('/').filter(|s| !s.is_empty()).collect()
+    };
+    for c in path.split('/') {
+        match c {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            c => parts.push(c),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// Images named by one line of a gallery block: a folder, a file, or a glob like
+/// `shots/*.png` (relative to the page, or to the site root with a leading '/').
+fn resolve_gallery(entries: &BTreeMap<String, Entry>, page_dir: &str, spec: &str) -> Vec<String> {
+    let spec = percent_decode(spec);
+    let Some(path) = norm_path(page_dir, &spec) else {
+        return Vec::new();
+    };
+    let images = |dir: &str, pat: Option<&str>| -> Vec<String> {
+        entries
+            .keys()
+            .filter(|k| {
+                parent_dir(k) == dir
+                    && is_gallery_image(k)
+                    && pat.is_none_or(|p| glob_match(p, file_name(k)))
+            })
+            .cloned()
+            .collect()
+    };
+    if path.contains(['*', '?']) {
+        let (dir, pat) = path.rsplit_once('/').unwrap_or(("", &path));
+        images(dir, Some(pat))
+    } else if entries.contains_key(&path) {
+        if is_gallery_image(&path) {
+            vec![path]
+        } else {
+            Vec::new()
+        }
+    } else {
+        images(&path, None)
+    }
+}
+
 /// Images a gallery shows as tiles; anything else stays in the file list.
 fn is_gallery_image(key: &str) -> bool {
     matches!(
@@ -2196,7 +2310,7 @@ fn make_thumbs(site: &Site) -> HashMap<String, Thumb> {
         .entries
         .keys()
         .filter(|k| {
-            site.in_gallery(parent_dir(k))
+            (site.in_gallery(parent_dir(k)) || site.inline_images.contains(k.as_str()))
                 && matches!(ext_of(k).as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
         })
         .collect();

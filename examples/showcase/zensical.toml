@@ -17,6 +17,7 @@ nav = [
   { "Guide" = [
     "guide/admonitions.md",
     "guide/snippets.md",
+    "guide/galleries.md",
   ] },
   { "Code and diagrams" = "reference/code.md" },
   { "webolator on GitHub" = "https://github.com/vivainio/webolator" },
