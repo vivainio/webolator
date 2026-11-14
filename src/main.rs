@@ -1709,10 +1709,10 @@ fn hero_html(title: &str, tagline: &str, actions: &[(String, String)]) -> String
 
 /// Summary for a section card: the folder index's description, else a page count.
 fn dir_summary(site: &Site, dir: &str) -> String {
-    if let Some(e) = site.index_key(dir).and_then(|k| site.entries.get(k)) {
-        if !e.description.is_empty() {
-            return e.description.clone();
-        }
+    if let Some(e) = site.index_key(dir).and_then(|k| site.entries.get(k))
+        && !e.description.is_empty()
+    {
+        return e.description.clone();
     }
     let n = site
         .reading_order()
@@ -2393,6 +2393,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
                   from_label: &str,
                   title: &str,
                   doc: Doc,
+                  extra_head: &str,
                   body_fn: &dyn Fn(&Ctx) -> String|
      -> Result<(), String> {
         let ctx = Ctx {
@@ -2420,8 +2421,10 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             Doc::Entry(k) => Some(site.entries[k].description.as_str()).filter(|d| !d.is_empty()),
             Doc::Listing(_) => None,
         };
-        let head =
-            head_for(from_out) + &ctx.favicon_link() + &ctx.seo_head(&full_title, desc, from_out);
+        let head = head_for(from_out)
+            + &ctx.favicon_link()
+            + &ctx.seo_head(&full_title, desc, from_out)
+            + extra_head;
         write(
             from_out,
             page_html(&Page {
@@ -2442,7 +2445,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
     for (k, e) in &site.entries {
         let out = &site.out[k];
         if e.kind == Kind::Page {
-            render(out, k, &e.title, Doc::Entry(k.clone()), &|ctx| {
+            render(out, k, &e.title, Doc::Entry(k.clone()), "", &|ctx| {
                 render_markdown(ctx, k)
             })?;
         } else {
@@ -2461,6 +2464,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
                     &out,
                     &site.dir_title(d),
                     Doc::Listing(d.clone()),
+                    "",
                     &|ctx| render_listing(ctx, d),
                 )?;
             }
@@ -2470,10 +2474,67 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
                     out,
                     &site.dir_title(d),
                     Doc::Listing(d.clone()),
+                    "",
                     &|ctx| render_files(ctx, d),
                 )?;
             }
             DirIndex::Entry(_) => {}
+        }
+    }
+    // 404.html unless the site has its own. Hosts serve it at any depth, so links are
+    // made absolute with <base> when we know where the site lives.
+    let mut extra = 0;
+    if !site.out.values().any(|o| o == "404.html") {
+        let base = match &site.config.url {
+            Some(u) => format!("<base href=\"{}/\">\n", esc(u)),
+            None => String::new(),
+        };
+        render(
+            "404.html",
+            "404.html",
+            "Page not found",
+            Doc::Listing("\0404".into()),
+            &(base + "<meta name=\"robots\" content=\"noindex\">\n"),
+            &|ctx| {
+                let home = ctx.href("", true, None).unwrap_or_default();
+                format!(
+                    "<h1>Page not found</h1>\n<p>That page doesn't exist. <a href=\"{}\">Go to the home page</a>.</p>\n",
+                    esc(&home)
+                )
+            },
+        )?;
+        extra += 1;
+    }
+    // sitemap.xml and robots.txt need to know the public address.
+    if let Some(base) = &site.config.url {
+        let mut urls: Vec<String> = site
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == Kind::Page && !e.hidden)
+            .map(|(k, _)| page_url(base, &site.out[k]))
+            .collect();
+        for (d, idx) in &site.dirs {
+            if matches!(idx, DirIndex::Generated) {
+                urls.push(page_url(base, &join_key(&clean_dir(d), "index.html")));
+            }
+        }
+        urls.sort();
+        urls.dedup();
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+        );
+        for u in &urls {
+            xml += &format!("  <url><loc>{}</loc></url>\n", esc(u));
+        }
+        xml += "</urlset>\n";
+        write("sitemap.xml", xml.as_bytes())?;
+        extra += 1;
+        if !site.out.values().any(|o| o == "robots.txt") {
+            write(
+                "robots.txt",
+                format!("User-agent: *\nAllow: /\n\nSitemap: {base}/sitemap.xml\n").as_bytes(),
+            )?;
+            extra += 1;
         }
     }
     let generated = site
@@ -2481,7 +2542,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         .values()
         .filter(|i| !matches!(i, DirIndex::Entry(_)))
         .count();
-    Ok(site.entries.len() + generated)
+    Ok(site.entries.len() + generated + extra)
 }
 
 fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
@@ -2717,9 +2778,18 @@ fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(
                 tiny_http::Response::from_data(bytes)
                     .with_header(tiny_http::Header::from_bytes("Content-Type", mime).unwrap()),
             ),
-            None => {
-                req.respond(tiny_http::Response::from_string("not found").with_status_code(404))
-            }
+            None => match fs::read(tmp.join("404.html")) {
+                Ok(b) => req.respond(
+                    tiny_http::Response::from_data(b)
+                        .with_status_code(404)
+                        .with_header(
+                            tiny_http::Header::from_bytes("Content-Type", "text/html").unwrap(),
+                        ),
+                ),
+                Err(_) => {
+                    req.respond(tiny_http::Response::from_string("not found").with_status_code(404))
+                }
+            },
         };
     }
     Ok(())
