@@ -164,8 +164,10 @@ See [Single-file output](03-features/03-single-file.md).
 
 ```bash
 webolator skill                    # print it
-webolator skill --install          # write ~/.claude/skills/webolator/SKILL.md
+webolator skill --install          # write ~/.claude/skills/webolator/SKILL.md (or under $CLAUDE_CONFIG_DIR)
 webolator skill --install --project  # write ./.claude/skills/webolator/SKILL.md instead
 ```
+
+If the `CLAUDE_CONFIG_DIR` environment variable is set, `--install` writes under that folder instead of `~/.claude`.
 
 `skill` is only a command when it is the first argument. To build a folder with that name, write `webolator ./skill`.

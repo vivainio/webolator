@@ -3173,8 +3173,8 @@ fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(
 
 const SKILL: &str = include_str!("skill.md");
 
-/// `webolator skill [--install] [--project]`: prints the Claude Code skill, or writes it
-/// to ~/.claude/skills/webolator/ (or ./.claude/skills/webolator/ with --project).
+/// `webolator skill [--install] [--project]`: prints the Claude Code skill, or writes it to
+/// $CLAUDE_CONFIG_DIR/skills/webolator/ (default ~/.claude), or ./.claude/ with --project.
 fn skill_command(args: &[String]) -> Result<(), String> {
     let mut install = false;
     let mut project = false;
@@ -3186,7 +3186,7 @@ fn skill_command(args: &[String]) -> Result<(), String> {
                 println!(
                     "Print the webolator skill (SKILL.md) for Claude Code.\n\n\
                      Usage: webolator skill [--install [--project]]\n\n\
-                     \x20     --install   Write it to ~/.claude/skills/webolator/SKILL.md\n\
+                     \x20     --install   Write it to $CLAUDE_CONFIG_DIR (default ~/.claude)/skills/webolator/SKILL.md\n\
                      \x20     --project   With --install: write to ./.claude/skills/webolator/ instead"
                 );
                 return Ok(());
@@ -3201,15 +3201,18 @@ fn skill_command(args: &[String]) -> Result<(), String> {
         print!("{SKILL}");
         return Ok(());
     }
-    let base = if project {
-        PathBuf::from(".")
+    // Project installs go in ./.claude; user installs in $CLAUDE_CONFIG_DIR, else ~/.claude.
+    let config = if project {
+        PathBuf::from(".claude")
+    } else if let Some(d) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        PathBuf::from(d)
     } else {
         std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
+            .map(|h| PathBuf::from(h).join(".claude"))
             .ok_or("skill: can't find the home folder")?
     };
-    let dir = base.join(".claude/skills/webolator");
+    let dir = config.join("skills/webolator");
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = dir.join("SKILL.md");
     fs::write(&file, SKILL).map_err(|e| format!("{}: {e}", file.display()))?;

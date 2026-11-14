@@ -19,7 +19,7 @@ Turn a folder of markdown, or a single `.md` file, into a browsable website. No 
 - **`--gallery screenshots/`** shows a folder of images as a thumbnail grid with click-to-zoom. To put a gallery in the middle of a page, use a ```` ```gallery ```` fence listing a folder, files or a glob.
 - **Custom CSS.** A `webolator.css` in the docs root is applied automatically, or you can pass `--css file.css`. Colors are CSS variables, so a theme can be a few lines. See [styling](https://vivainio.github.io/webolator/features/styling.html).
 - **Search.** A small client-side index (about 16 KB for these docs), loaded only when you click the search box. Prefix matching, no typo tolerance.
-- **Claude Code skill.** `webolator skill` prints a `SKILL.md` for agents, and `webolator skill --install` puts it in `~/.claude/skills/`.
+- **Claude Code skill.** `webolator skill` prints a `SKILL.md` for agents, and `webolator skill --install` puts it in `~/.claude/skills/` (or under `$CLAUDE_CONFIG_DIR`).
 - **Optional config.** A `webolator.toml` or `zensical.toml` sets the site name, description, URL, logo, favicon, footer and an explicit `nav`. See [config](https://vivainio.github.io/webolator/features/config.html).
 - **Landing page.** With no `index.md` you get a generated home page with a hero and section cards, and `layout: home` lets you design your own.
 - **Docs-site extras.** Content tabs, `!!!` admonitions, `???` collapsibles, `--8<--` snippets and code block titles, plus `404.html`, `sitemap.xml`, `robots.txt` and SEO meta tags on deploy.
