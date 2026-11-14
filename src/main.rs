@@ -1175,10 +1175,20 @@ const HL_PREFIX: &str = "hl-";
 const HL_LIGHT: &str = "InspiredGitHub";
 const HL_DARK: &str = "base16-ocean.dark";
 
+/// bat's syntax collection (via two-face) plus Luau, which bat doesn't ship yet.
+fn syntax_set() -> syntect::parsing::SyntaxSet {
+    use syntect::parsing::syntax_definition::SyntaxDefinition;
+    let mut builder = two_face::syntax::extra_newlines().into_builder();
+    let luau = include_str!("syntaxes/Luau.sublime-syntax");
+    builder.add(SyntaxDefinition::load_from_str(luau, true, Some("Luau")).expect("bundled Luau syntax"));
+    builder.build()
+}
+
 fn highlighter() -> &'static SyntectAdapter {
     static H: OnceLock<SyntectAdapter> = OnceLock::new();
     H.get_or_init(|| {
         SyntectAdapterBuilder::new()
+            .syntax_set(syntax_set())
             .css_with_class_prefix(HL_PREFIX)
             .build()
     })

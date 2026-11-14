@@ -71,11 +71,7 @@ print("hello")
 print("hello")
 ```
 
-The word after the fence can be a language name or a file extension. It's case-insensitive, so `python`, `py`, `Rust` and `rs` all work. These languages are highlighted:
-
-ActionScript, AppleScript, ASP, Batch (`bat`, `cmd`), BibTeX, Bash (`bash`, `sh`, `zsh`), C, C#, C++, Clojure, CSS, D, Diff (`diff`, `patch`), Erlang, Go, Graphviz (`dot`), Groovy, Haskell, HTML, Java, Java properties, JavaScript (`js`), JSON, LaTeX (`tex`), Lisp, Lua, Makefile, Markdown, MATLAB, Objective-C, OCaml, Pascal, Perl, PHP, Python (`py`), R, reStructuredText, Ruby, Rust (`rs`), Scala, SQL, Tcl, Textile, XML, YAML (`yml`).
-
-Anything else, including TypeScript, TOML, Dockerfile, Kotlin and Swift, is shown as plain text. Every code block gets a copy button.
+The word after the fence can be a language name or a file extension. It's case-insensitive, so `python`, `py`, `Rust` and `rs` all work. Languages come from [bat](https://github.com/sharkdp/bat)'s syntax collection plus Luau, so most common ones work: Rust, Python, JavaScript, TypeScript, Go, C/C++, C#, Java, Kotlin, Swift, Ruby, PHP, Lua, Luau, SQL, Bash, TOML, YAML, JSON, HTML, CSS, Dockerfile, Markdown, Diff and many more. Anything not recognized is shown as plain text. Every code block gets a copy button.
 
 ## Diagrams
 
