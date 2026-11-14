@@ -117,10 +117,11 @@ An optional block at the very top of a file:
 title: Shown in the sidebar and browser tab
 order: 3
 hidden: true
+description: One line for link previews and cards
 ---
 ```
 
-These are the only fields, and any others are ignored. See [Front matter](03-features/05-writing.md#front-matter). This page uses it (`title` and `order: 3`) to sit between Links and the features folder.
+The fields are `title`, `order`, `hidden`, `description`, and `layout`, `tagline`, `action` and `action2` for [landing pages](04-configuration/04-landing-page.md). Any other keys are ignored. See [Front matter](04-configuration/03-front-matter.md). This page uses it (`title` and `order: 3`) to sit between Links and the features folder.
 
 ## Special file names
 
@@ -128,7 +129,10 @@ These are the only fields, and any others are ignored. See [Front matter](03-fea
 |---|---|
 | `README.md`, `index.md` | the folder's home page (`index.md` wins if both exist) |
 | `01-name.md`, `02-folder/` | number prefix: sets the order, hidden from labels and URLs |
-| `webolator.css` (in the root) | [custom styles](03-features/04-styling.md), applied automatically |
+| `webolator.css`, `webolator.js` (in the root) | [custom styles and scripts](04-configuration/06-styles-and-scripts.md), applied automatically |
+| `webolator.toml`, `zensical.toml` | the optional [config file](04-configuration/README.md), in the docs folder or its parent |
+| `favicon.svg`, `.png`, `.ico` (in the root) | the tab icon, picked up automatically |
+| `404.md` | your own [404 page](04-configuration/07-deployment.md) |
 | `.webolatorignore` | [files to leave out](01-usage.md#leaving-files-out), in gitignore syntax |
 | `.gitignore`, `.ignore` | honored by default, `--no-ignore` turns them off |
 

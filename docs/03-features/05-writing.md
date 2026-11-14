@@ -36,7 +36,7 @@ Matching ignores case and treats spaces, `-` and `_` the same. A name that match
 
 ## Front matter
 
-An optional `---` block at the top of a file adjusts that one page. Every field is optional:
+An optional `---` block at the top of a file adjusts that one page:
 
 ```markdown
 ---
@@ -46,10 +46,4 @@ hidden: true
 ---
 ```
 
-| Field | Effect |
-|---|---|
-| `title` | replaces the first `# heading` as the page's title in the sidebar, browser tab and previous/next links |
-| `order` | sets the sidebar position and takes precedence over a `01-` filename prefix. On a folder's `README.md` or `index.md`, it positions the whole folder. |
-| `hidden` | the page is still built and can be linked to, but it's left out of the sidebar and previous/next links |
-
-The front matter itself is not shown on the page.
+`title`, `order` and `hidden` change how the page appears in the sidebar, and `description` and `layout` control link previews and landing pages. Every field is optional, and the block is not shown on the page. See [Front matter](../04-configuration/03-front-matter.md) for the full list.

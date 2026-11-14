@@ -1,8 +1,8 @@
 # webolator
 
-**Point it at a folder of markdown and get a website.** It needs no config file, no index file and no `SUMMARY.md`. When you want more control, an optional [`webolator.toml`](03-features/07-config.md) (or a Zensical `zensical.toml`) sets the site name, navigation and more.
+**Point it at a folder of markdown and get a website.** It needs no config file, no index file and no `SUMMARY.md`. When you want more control, an optional [`webolator.toml`](04-configuration/README.md) (or a Zensical `zensical.toml`) sets the site name, navigation and more.
 
-This site is itself built by webolator from the [`docs/`](https://github.com/vivainio/webolator/tree/main/docs) folder of the repository. See [Publishing to GitHub Pages](04-publishing.md) for how.
+This site is itself built by webolator from the [`docs/`](https://github.com/vivainio/webolator/tree/main/docs) folder of the repository. See [Publishing to GitHub Pages](05-publishing.md) for how.
 
 ```bash
 uvx webolator docs/ --serve
@@ -23,7 +23,7 @@ flowchart LR
 
 ## Features
 
-- **Zero config by default.** The sidebar comes from the directory tree, and page titles come from each file's first `# heading`. A [config file](03-features/07-config.md) is optional.
+- **Zero config by default.** The sidebar comes from the directory tree, and page titles come from each file's first `# heading`. A [config file](04-configuration/README.md) is optional.
 - **[Mermaid diagrams](03-features/01-mermaid.md)** are rendered in the browser.
 - **[Syntax highlighting](03-features/02-highlighting.md)** happens at build time, with light and dark themes.
 - **[Cross-file links](02-links.md)** to `.md` files, folders and headings are rewritten to the right place.
@@ -36,9 +36,9 @@ flowchart LR
 - **[Reading comfort](03-features/06-reading.md)**: an "On this page" sidebar, previous/next links, "last updated" and "Edit this page" from git, a light/dark toggle, copy buttons, image zoom and a phone menu.
 - **[Writing extras](03-features/05-writing.md)**: math, emoji, `[[wikilinks]]` and optional front matter.
 - **[Leaves out junk](01-usage.md#leaving-files-out)**: `.gitignore` is honored, and `.webolatorignore` and `--exclude` cover the rest.
-- **[Config and landing page](03-features/07-config.md)**: `webolator.toml` / `zensical.toml`, a generated home page, `404.html`, sitemap and SEO tags.
 - **[Tabs, admonitions, snippets and galleries](03-features/08-extensions.md)**: the MkDocs-style syntax for docs sites.
-- **[Custom CSS](03-features/04-styling.md)**: drop a `webolator.css` into the folder, or pass `--css`.
+- **[Custom CSS](03-features/04-styling.md)**: drop a `webolator.css` into the folder, or pass `--css`. Scripts work the same way with `webolator.js`.
+- **[Configuration](04-configuration/README.md)**: the optional `webolator.toml` / `zensical.toml`, [site settings](04-configuration/01-site-settings.md), [navigation](04-configuration/02-navigation.md), [front matter](04-configuration/03-front-matter.md), [landing pages](04-configuration/04-landing-page.md), [search](04-configuration/05-search.md) and [deployment](04-configuration/07-deployment.md).
 
 ## See it in action
 
