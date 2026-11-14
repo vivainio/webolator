@@ -3025,3 +3025,34 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_reads_project_table_and_nav() {
+        let c = parse_config(
+            "[project]\nsite_name = \"X\"\nsite_url = \"https://a.b/c/\"\n\
+             nav = [\"a.md\", { \"T\" = \"b.md\" }, { \"S\" = [\"c.md\"] }, { \"L\" = \"https://x\" }]\n\
+             [project.theme]\nlogo = \"l.svg\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.site_name.as_deref(), Some("X"));
+        assert_eq!(c.url.as_deref(), Some("https://a.b/c"));
+        assert_eq!(c.logo.as_deref(), Some("l.svg"));
+        assert_eq!(c.nav.unwrap().len(), 4);
+    }
+
+    #[test]
+    fn config_accepts_top_level_keys() {
+        let c = parse_config("site_name = \"Top\"").unwrap();
+        assert_eq!(c.site_name.as_deref(), Some("Top"));
+    }
+
+    #[test]
+    fn page_url_hides_index() {
+        assert_eq!(page_url("https://a.b", "x/index.html"), "https://a.b/x/");
+        assert_eq!(page_url("https://a.b", "x/y.html"), "https://a.b/x/y.html");
+    }
+}

@@ -287,3 +287,35 @@ pub fn preprocess(md: &str, base: &Path, root: &Path) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(md: &str) -> String {
+        preprocess(md, Path::new("."), Path::new("."))
+    }
+
+    #[test]
+    fn tabs_group_and_nest_body() {
+        let out = run("=== \"A\"\n\n    one\n\n=== \"B\"\n\n    two\n\nafter\n");
+        assert_eq!(out.matches("<div class=\"tabbed\">").count(), 1);
+        assert!(out.contains("data-title=\"A\"") && out.contains("data-title=\"B\""));
+        assert!(out.contains("\none\n") && out.contains("\ntwo\n"));
+        assert!(out.trim_end().ends_with("after"));
+    }
+
+    #[test]
+    fn admonition_title_and_collapsible() {
+        let out = run("!!! tip\n    hi\n\n???+ danger \"Oh no\"\n    bye\n");
+        assert!(out.contains("<p class=\"admonition-title\">Tip</p>"));
+        assert!(out.contains("<details class=\"admonition caution danger\" open>"));
+        assert!(out.contains("<summary>Oh no</summary>"));
+    }
+
+    #[test]
+    fn fenced_code_is_untouched() {
+        let md = "```\n=== \"A\"\n!!! note\n```\n";
+        assert_eq!(run(md), md);
+    }
+}
