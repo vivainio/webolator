@@ -88,3 +88,25 @@ Hide the sidebar:
 ```css
 nav.side { display: none; }
 ```
+
+## Extra JavaScript and CSS
+
+Scripts work the same way as styles. A `webolator.js` in the docs root is added to every page, or pass `--js file.js`. For more than one file, or for files from a CDN, use the `extra_css` and `extra_javascript` keys of the [config file](07-config.md), which are the same as in Zensical and MkDocs:
+
+```toml
+[project]
+extra_css = ["css/brand.css", "https://fonts.example.com/x.css"]
+extra_javascript = [
+  "js/analytics.js",
+  "https://cdn.example.com/lib.js",
+  { path = "js/app.js", type = "module", defer = true },
+]
+```
+
+- Local paths are relative to the docs folder. The files are copied to the same place in the site, so `url(...)` in a stylesheet resolves like in the source, and they don't appear in the sidebar. A path that doesn't exist is a warning, so `--check` catches it.
+- Stylesheets go in the page head, in the order listed and before `webolator.css`. Scripts go at the end of the page, after the built-in script, in the order listed and before `webolator.js`.
+- The table form takes `type`, `async` and `defer`.
+- In `--single` output local files are inlined and URLs stay as tags.
+
+Scripts run with full access to the page, so only add code you trust.
+

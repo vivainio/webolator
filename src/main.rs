@@ -67,6 +67,8 @@ const TEXT_EXT: &[&str] = &[
 const OUTPUT_MARKER: &str = ".webolator-output";
 /// A stylesheet with this name in the site root is applied automatically.
 const CUSTOM_CSS: &str = "webolator.css";
+/// Likewise a script with this name in the site root is added to every page.
+const CUSTOM_JS: &str = "webolator.js";
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "__pycache__", "venv"];
 
 #[derive(Parser)]
@@ -95,6 +97,9 @@ struct Cli {
     /// Extra stylesheet applied after the built-in styles (in addition to <root>/webolator.css)
     #[arg(long)]
     css: Option<PathBuf>,
+    /// Extra script added to every page (in addition to <root>/webolator.js)
+    #[arg(long)]
+    js: Option<PathBuf>,
     /// Leave out files matching this gitignore-style pattern (repeatable)
     #[arg(long, value_name = "GLOB")]
     exclude: Vec<String>,
@@ -185,6 +190,9 @@ struct Config {
     docs_dir: Option<String>,
     /// `search = false` turns the search box and index off.
     no_search: bool,
+    /// `extra_css` / `extra_javascript`: local files (relative to the site folder) or URLs.
+    extra_css: Vec<Extra>,
+    extra_js: Vec<Extra>,
     /// Explicit sidebar, as in `nav = [...]`.
     nav: Option<Vec<NavItem>>,
     /// The file the settings came from.
@@ -216,12 +224,83 @@ fn parse_config(text: &str) -> Result<Config, String> {
         favicon: theme.and_then(|t| get(t, "favicon")),
         docs_dir: get(proj, "docs_dir"),
         no_search: proj.get("search").and_then(|v| v.as_bool()) == Some(false),
+        extra_css: parse_extras(proj.get("extra_css")),
+        extra_js: parse_extras(proj.get("extra_javascript")),
         nav: proj
             .get("nav")
             .and_then(|v| v.as_array())
             .map(|a| parse_nav(a)),
         path: None,
     })
+}
+
+/// An `extra_css` / `extra_javascript` entry: a path or URL, plus HTML attributes.
+#[derive(Clone)]
+struct Extra {
+    path: String,
+    /// Ready to put in a tag, e.g. ` type="module" defer`.
+    attrs: String,
+}
+
+/// `["a.js", { path = "b.js", type = "module", async = true, defer = true }]`
+fn parse_extras(v: Option<&toml::Value>) -> Vec<Extra> {
+    let Some(toml::Value::Array(items)) = v else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items {
+        match item {
+            toml::Value::String(s) => out.push(Extra {
+                path: s.clone(),
+                attrs: String::new(),
+            }),
+            toml::Value::Table(t) => {
+                let Some(path) = t.get("path").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let mut attrs = String::new();
+                if let Some(ty) = t.get("type").and_then(|v| v.as_str()) {
+                    attrs += &format!(" type=\"{}\"", esc(ty));
+                }
+                for flag in ["async", "defer"] {
+                    if t.get(flag).and_then(|v| v.as_bool()) == Some(true) {
+                        attrs += &format!(" {flag}");
+                    }
+                }
+                out.push(Extra {
+                    path: path.to_string(),
+                    attrs,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Where an extra file comes from.
+#[derive(Clone)]
+enum ExtraSrc {
+    Url(String),
+    /// A file inside the site folder, by key.
+    File(String),
+}
+
+fn resolve_extras(root: &Path, label: &str, list: &[Extra]) -> Vec<(ExtraSrc, String)> {
+    let mut out = Vec::new();
+    for e in list {
+        if has_scheme(&e.path) || e.path.starts_with("//") {
+            out.push((ExtraSrc::Url(e.path.clone()), e.attrs.clone()));
+            continue;
+        }
+        match norm_path("", &e.path) {
+            Some(k) if root.join(&k).is_file() => {
+                out.push((ExtraSrc::File(k), e.attrs.clone()));
+            }
+            _ => print_warning(label, &format!("{}: not found in the site folder", e.path)),
+        }
+    }
+    out
 }
 
 /// One entry of an explicit `nav`.
@@ -372,6 +451,9 @@ struct Site {
     gallery: Vec<String>,
     /// Images used by ```gallery blocks (they get thumbnails too).
     inline_images: BTreeSet<String>,
+    /// Resolved `extra_css` and `extra_javascript`, with their tag attributes.
+    extra_css: Vec<(ExtraSrc, String)>,
+    extra_js: Vec<(ExtraSrc, String)>,
 }
 
 /// A page in reading order (sidebar order, depth first).
@@ -765,11 +847,24 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
             .any(|fd| fd.is_empty() || k == fd || k.starts_with(&format!("{fd}/")))
     };
 
+    // Extra CSS/JS files are copied (or inlined) separately, not shown as pages.
+    let extra_css = resolve_extras(&root, "extra_css", &config.extra_css);
+    let extra_js = resolve_extras(&root, "extra_javascript", &config.extra_js);
+    let extra_keys: HashSet<String> = extra_css
+        .iter()
+        .chain(&extra_js)
+        .filter_map(|(src, _)| match src {
+            ExtraSrc::File(k) => Some(k.clone()),
+            ExtraSrc::Url(_) => None,
+        })
+        .collect();
     let mut entries = BTreeMap::new();
-    for k in keys
-        .into_iter()
-        .filter(|k| k != CUSTOM_CSS && !CONFIG_FILES.contains(&k.as_str()))
-    {
+    for k in keys.into_iter().filter(|k| {
+        k != CUSTOM_CSS
+            && k != CUSTOM_JS
+            && !CONFIG_FILES.contains(&k.as_str())
+            && !extra_keys.contains(k)
+    }) {
         let kind = kind_of(&k);
         let entry = if in_files_dir(&k) {
             // Copied as is and only shown in the folder's file list.
@@ -986,6 +1081,8 @@ fn load_site(input: &Path, scan: &ScanOpts) -> Result<Site, String> {
         git,
         gallery: gallery_dirs,
         inline_images,
+        extra_css,
+        extra_js,
     })
 }
 
@@ -2667,6 +2764,7 @@ fn mermaid_script(src: &str, single: bool) -> String {
 struct BuildOpts {
     mermaid_js: Option<PathBuf>,
     css: Option<PathBuf>,
+    js: Option<PathBuf>,
     live_reload: bool,
 }
 
@@ -2681,6 +2779,70 @@ fn custom_css(site: &Site, opts: &BuildOpts) -> Result<Option<String>, String> {
         parts.push(fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?);
     }
     Ok((!parts.is_empty()).then(|| parts.join("\n")))
+}
+
+/// User script: `<root>/webolator.js`, then `--js`. None if there are neither.
+fn custom_js(site: &Site, opts: &BuildOpts) -> Result<Option<String>, String> {
+    let auto = site.root.join(CUSTOM_JS);
+    let mut parts = Vec::new();
+    if auto.is_file() {
+        parts.push(read_lossy(&auto));
+    }
+    if let Some(p) = &opts.js {
+        parts.push(fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?);
+    }
+    Ok((!parts.is_empty()).then(|| parts.join("\n;\n")))
+}
+
+/// Tags for the extra stylesheets (`css`) or scripts of a static page. Local files are
+/// linked relative to the page.
+fn extra_tags(list: &[(ExtraSrc, String)], from_out: &str, css: bool) -> String {
+    let mut h = String::new();
+    for (src, attrs) in list {
+        let href = match src {
+            ExtraSrc::Url(u) => u.clone(),
+            ExtraSrc::File(k) => rel_href(from_out, k),
+        };
+        h += &if css {
+            format!("<link rel=\"stylesheet\" href=\"{}\">\n", esc(&href))
+        } else {
+            format!("<script src=\"{}\"{attrs}></script>\n", esc(&href))
+        };
+    }
+    h
+}
+
+/// Same for single-file output: local files are inlined.
+fn extra_inline(site: &Site, list: &[(ExtraSrc, String)], css: bool) -> String {
+    let mut h = String::new();
+    for (src, attrs) in list {
+        match src {
+            ExtraSrc::Url(u) if css => {
+                h += &format!("<link rel=\"stylesheet\" href=\"{}\">\n", esc(u))
+            }
+            ExtraSrc::Url(u) => h += &format!("<script src=\"{}\"{attrs}></script>\n", esc(u)),
+            ExtraSrc::File(k) => {
+                let text = read_lossy(&site.root.join(k));
+                h += &if css {
+                    format!(
+                        "<style>\n{}\n</style>\n",
+                        text.replace("</style", "<\\/style")
+                    )
+                } else {
+                    let ty = attrs
+                        .split_whitespace()
+                        .find(|a| a.starts_with("type="))
+                        .map(|t| format!(" {t}"))
+                        .unwrap_or_default();
+                    format!(
+                        "<script{ty}>\n{}\n</script>\n",
+                        text.replace("</script", "<\\/script")
+                    )
+                };
+            }
+        }
+    }
+    h
 }
 
 const LIVE_RELOAD: &str = "<script>(()=>{let v=null;setInterval(async()=>{try{const t=await (await fetch('/__webolator/version')).text();if(v!==null&&t!==v)location.reload();v=t}catch(e){}},700)})();</script>\n";
@@ -2703,12 +2865,24 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
     if let Some(css) = &css {
         write(CUSTOM_CSS, css.as_bytes())?;
     }
-    let head_for = |from_out: &str| match &css {
-        Some(_) => format!(
-            "<link rel=\"stylesheet\" href=\"{}\">\n",
-            rel_href(from_out, CUSTOM_CSS)
-        ),
-        None => String::new(),
+    let js = custom_js(site, opts)?;
+    if let Some(js) = &js {
+        write(CUSTOM_JS, js.as_bytes())?;
+    }
+    for (src, _) in site.extra_css.iter().chain(&site.extra_js) {
+        if let ExtraSrc::File(k) = src {
+            write(k, &fs::read(site.root.join(k)).map_err(io)?)?;
+        }
+    }
+    let head_for = |from_out: &str| {
+        let mut h = extra_tags(&site.extra_css, from_out, true);
+        if css.is_some() {
+            h += &format!(
+                "<link rel=\"stylesheet\" href=\"{}\">\n",
+                rel_href(from_out, CUSTOM_CSS)
+            );
+        }
+        h
     };
     if let Some(js) = &opts.mermaid_js {
         write(
@@ -2727,6 +2901,13 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
                 None => format!("<script src=\"{MERMAID_CDN}\"></script>"),
             };
             t += &mermaid_script(&src, false);
+        }
+        t += &extra_tags(&site.extra_js, from_out, false);
+        if js.is_some() {
+            t += &format!(
+                "<script src=\"{}\"></script>\n",
+                rel_href(from_out, CUSTOM_JS)
+            );
         }
         if opts.live_reload {
             t += LIVE_RELOAD;
@@ -3020,7 +3201,15 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         };
         tail = mermaid_script(&src, true) + &tail;
     }
+    tail += &extra_inline(site, &site.extra_js, false);
+    if let Some(js) = custom_js(site, opts)? {
+        tail += &format!(
+            "<script>\n{}\n</script>\n",
+            js.replace("</script", "<\\/script")
+        );
+    }
     let head = favicon
+        + &extra_inline(site, &site.extra_css, true)
         + &match custom_css(site, opts)? {
             Some(css) => format!(
                 "<style>\n{}\n</style>\n",
@@ -3080,7 +3269,7 @@ fn fingerprint(input: &Path, scan: &ScanOpts) -> (usize, SystemTime) {
 fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(), String> {
     let tmp = std::env::temp_dir().join(format!("webolator-{}", std::process::id()));
     let watch_input = input.clone();
-    let css_path = opts.css.clone();
+    let css_path = (opts.css.clone(), opts.js.clone());
     let watch_scan = scan.clone();
     let rebuild = {
         let tmp = tmp.clone();
@@ -3098,9 +3287,11 @@ fn serve(input: PathBuf, port: u16, opts: BuildOpts, scan: ScanOpts) -> Result<(
         let input = watch_input;
         let css = css_path;
         let state = move || {
-            let css_mtime = css
-                .as_ref()
-                .and_then(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
+            let mtime = |p: &Option<PathBuf>| {
+                p.as_ref()
+                    .and_then(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+            };
+            let css_mtime = (mtime(&css.0), mtime(&css.1));
             (fingerprint(&input, &watch_scan), css_mtime)
         };
         std::thread::spawn(move || {
@@ -3231,6 +3422,7 @@ fn run() -> Result<(), String> {
     let opts = BuildOpts {
         mermaid_js: cli.mermaid_js.clone(),
         css: cli.css.clone(),
+        js: cli.js.clone(),
         live_reload: cli.serve,
     };
     let mut scan = ScanOpts {
@@ -3309,6 +3501,19 @@ mod tests {
         assert_eq!(c.url.as_deref(), Some("https://a.b/c"));
         assert_eq!(c.logo.as_deref(), Some("l.svg"));
         assert_eq!(c.nav.unwrap().len(), 4);
+    }
+
+    #[test]
+    fn extras_accept_strings_and_tables() {
+        let c = parse_config(
+            "[project]\nextra_javascript = [\"a.js\", { path = \"b.js\", type = \"module\", async = true }]\n\
+             extra_css = [\"c.css\"]\n",
+        )
+        .unwrap();
+        assert_eq!(c.extra_css.len(), 1);
+        assert_eq!(c.extra_js[0].attrs, "");
+        assert_eq!(c.extra_js[1].path, "b.js");
+        assert_eq!(c.extra_js[1].attrs, " type=\"module\" async");
     }
 
     #[test]

@@ -23,7 +23,7 @@ Useful flags:
 - `--exclude GLOB` (repeatable), `--no-ignore`: what to leave out. `.gitignore` and `.webolatorignore` are honored.
 - `--files DIR`: show a folder as a file list (name, size, date) instead of rendering it.
 - `--gallery DIR`: show a folder of images as a thumbnail grid with click-to-zoom.
-- `--css FILE`: extra stylesheet. A `webolator.css` in the docs root is picked up automatically.
+- `--css FILE`, `--js FILE`: extra stylesheet or script for every page. A `webolator.css` or `webolator.js` in the docs root is picked up automatically.
 - `--mermaid-js FILE`: use a local mermaid.min.js instead of the CDN (offline use).
 - `--no-git`: skip "last updated" and "Edit this page" from git.
 - `--allow-large`: publish files over 10 MB.
@@ -62,6 +62,8 @@ site_author = "Acme Team"
 copyright = "&copy; 2026 Acme"
 repo_url = "https://github.com/acme/acme"
 search = false                           # drop the search box and index
+extra_css = ["css/brand.css"]            # local files or URLs
+extra_javascript = ["js/app.js", { path = "js/m.js", type = "module" }]
 nav = [
   "index.md",
   { "Getting started" = ["install.md", { "First steps" = "first.md" }] },

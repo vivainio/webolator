@@ -16,6 +16,7 @@ copyright = "&copy; 2026 Acme"
 repo_url = "https://github.com/acme/acme"
 docs_dir = "docs"          # only when you pass the project folder
 search = false             # leave out the search box and its index
+extra_javascript = ["js/app.js"]   # also extra_css
 
 nav = [
   "index.md",
@@ -38,6 +39,7 @@ favicon = "img/favicon.png"
 | `repo_url` | "Repository" button on the home page |
 | `docs_dir` | Pages folder, when you build from the project folder (`zensical.toml` assumes `docs/`) |
 | `search` | `false` removes the [search](06-reading.md#search) box and index |
+| `extra_css`, `extra_javascript` | Extra stylesheets and scripts for every page. See [styling](04-styling.md#extra-javascript-and-css) |
 | `nav` | Explicit sidebar and previous/next order. Pages not listed are still built |
 | `theme.logo`, `theme.favicon` | Logo in the sidebar header and the tab icon. A `favicon.svg`, `.png` or `.ico` in the docs root is picked up automatically |
 
