@@ -1982,18 +1982,18 @@ fn render_source_index(site: &Site, href: impl Fn(&str) -> String) -> String {
     html + "</ul>\n"
 }
 
-fn source_index_link(href: &str) -> String {
-    format!(
-        "<div class=\"page-actions\"><a href=\"{}\">{SOURCE_INDEX_TITLE}</a></div>\n",
-        esc(href)
-    )
-}
-
-fn with_markdown_source(html: &str, href: &str) -> String {
-    format!(
-        "<div class=\"page-actions\">{}</div>\n{html}",
-        markdown_source_link(href, "Markdown source")
-    )
+fn source_links(page: Option<&str>, index: Option<&str>) -> String {
+    if page.is_none() && index.is_none() {
+        return String::new();
+    }
+    let mut html = String::from("<div class=\"page-actions\">");
+    if let Some(href) = page {
+        html += &markdown_source_link(href, "Markdown source");
+    }
+    if let Some(href) = index {
+        html += &format!("<a href=\"{}\">{SOURCE_INDEX_TITLE}</a>", esc(href));
+    }
+    html + "</div>\n"
 }
 
 /// Primary and secondary buttons for a landing page: the first page after this one,
@@ -2291,14 +2291,21 @@ impl Ctx<'_> {
     }
 
     /// Article with its footer (meta line, pager) and table of contents.
-    fn wrap(&self, content: &str, key: Option<&str>, order: &[Doc], doc: &Doc) -> String {
+    fn wrap(
+        &self,
+        content: &str,
+        key: Option<&str>,
+        order: &[Doc],
+        doc: &Doc,
+        source_links: &str,
+    ) -> String {
         let meta = key.map(|k| self.page_meta_line(k)).unwrap_or_default();
         let foot = match &self.site.config.copyright {
             Some(c) => format!("<footer class=\"site-footer\">{c}</footer>\n"),
             None => String::new(),
         };
         format!(
-            "<div class=\"page-wrap\">\n<article>\n{content}{meta}{}{foot}</article>\n{}</div>\n",
+            "<div class=\"page-wrap\">\n<article>\n{content}{source_links}{meta}{}{foot}</article>\n{}</div>\n",
             self.pager(order, doc),
             render_toc(content)
         )
@@ -3022,13 +3029,15 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             Doc::Entry(k) => Some(k.as_str()),
             Doc::Listing(_) => None,
         };
-        let mut content = body_fn(&ctx);
-        if home.as_deref() == Some(from_out)
-            && let Some(path) = &source_index
-        {
-            content = source_index_link(&rel_href(from_out, path)) + &content;
-        }
-        let body = ctx.wrap(&content, key, &order, &doc);
+        let page_source = key
+            .filter(|k| site.entries[*k].kind == Kind::Page)
+            .map(|k| rel_href(from_out, &format!("{source_dir}/{k}")));
+        let index_href = source_index
+            .as_ref()
+            .filter(|_| home.as_deref() == Some(from_out))
+            .map(|path| rel_href(from_out, path));
+        let links = source_links(page_source.as_deref(), index_href.as_deref());
+        let body = ctx.wrap(&body_fn(&ctx), key, &order, &doc, &links);
         let nav = show_nav(site).then(|| render_nav(&ctx, Some(from_out)));
         let tail = tail_for(from_out, &body);
         let full_title = if title == site.title {
@@ -3080,13 +3089,12 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             let source = format!("{source_dir}/{k}");
             write(&source, &bytes)?;
             sources += 1;
-            let source_href = rel_href(out, &source);
             render(out, k, &e.title, Doc::Entry(k.clone()), "", &|ctx| {
                 let html = render_markdown(ctx, k, &bytes);
                 if !e.hidden {
                     index.borrow_mut().add_page(&e.title, out, &html, "");
                 }
-                with_markdown_source(&html, &source_href)
+                html
             })?;
         } else {
             write(out, &fs::read(site.root.join(k)).map_err(io)?)?;
@@ -3213,14 +3221,14 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
             Doc::Entry(k) => Some(k.clone()),
             Doc::Listing(_) => None,
         };
-        let home_link;
-        let inner = if has_source_index && id == home {
-            home_link = source_index_link(&format!("#{SINGLE_SOURCE_INDEX_ID}")) + inner;
-            &home_link
-        } else {
-            inner
-        };
-        let wrapped = ctx_for(id.to_string()).wrap(inner, key.as_deref(), &order, &doc);
+        let page_source = key
+            .as_deref()
+            .filter(|k| site.entries[*k].kind == Kind::Page)
+            .map(single_source_href);
+        let index_href =
+            (has_source_index && id == home).then(|| format!("#{SINGLE_SOURCE_INDEX_ID}"));
+        let links = source_links(page_source.as_deref(), index_href.as_deref());
+        let wrapped = ctx_for(id.to_string()).wrap(inner, key.as_deref(), &order, &doc, &links);
         format!(
             "<section class=\"page\" id=\"{}\" data-title=\"{}\" hidden>\n{wrapped}</section>\n",
             esc(id),
@@ -3255,7 +3263,7 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
                         .add_page(&e.title, &id, &html, &format!("{id}--"));
                 }
                 assets.borrow_mut().insert(k.clone());
-                with_markdown_source(&html, &single_source_href(k))
+                html
             }
             Kind::Text => format!(
                 "<h1>{}</h1>\n<pre class=\"file\">{}</pre>\n",
