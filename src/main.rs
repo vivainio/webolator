@@ -1952,16 +1952,47 @@ fn render_markdown(ctx: &Ctx, key: &str, bytes: &[u8]) -> String {
     html
 }
 
-fn with_markdown_source(html: &str, bytes: &[u8], source_href: Option<&str>) -> String {
-    let source_href = match source_href {
-        Some(href) => esc(href),
-        None => {
-            let source = base64::engine::general_purpose::STANDARD.encode(bytes);
-            format!("data:text/plain;charset=utf-8;base64,{source}")
-        }
-    };
+const SOURCE_INDEX_TITLE: &str = "All source documents";
+const SINGLE_SOURCE_INDEX_ID: &str = "webolator-source-documents";
+
+fn markdown_source_link(href: &str, label: &str) -> String {
     format!(
-        "<div class=\"page-actions\"><a class=\"markdown-source\" href=\"{source_href}\" target=\"_blank\" rel=\"noopener\">Markdown source</a></div>\n{html}"
+        "<a class=\"markdown-source\" href=\"{}\" target=\"_blank\" rel=\"noopener\">{}</a>",
+        esc(href),
+        esc(label)
+    )
+}
+
+fn single_source_href(key: &str) -> String {
+    format!("#asset:{}", percent_encode_path(key))
+}
+
+fn source_documents(site: &Site) -> impl Iterator<Item = &str> {
+    site.entries
+        .iter()
+        .filter(|(_, entry)| entry.kind == Kind::Page && !entry.hidden)
+        .map(|(key, _)| key.as_str())
+}
+
+fn render_source_index(site: &Site, href: impl Fn(&str) -> String) -> String {
+    let mut html = format!("<h1>{SOURCE_INDEX_TITLE}</h1>\n<ul>\n");
+    for key in source_documents(site) {
+        html += &format!("<li>{}</li>\n", markdown_source_link(&href(key), key));
+    }
+    html + "</ul>\n"
+}
+
+fn source_index_link(href: &str) -> String {
+    format!(
+        "<div class=\"page-actions\"><a href=\"{}\">{SOURCE_INDEX_TITLE}</a></div>\n",
+        esc(href)
+    )
+}
+
+fn with_markdown_source(html: &str, href: &str) -> String {
+    format!(
+        "<div class=\"page-actions\">{}</div>\n{html}",
+        markdown_source_link(href, "Markdown source")
     )
 }
 
@@ -2931,6 +2962,44 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         t
     };
 
+    let source_dir = (0..)
+        .map(|n| {
+            if n == 0 {
+                "_markdown".into()
+            } else {
+                format!("_markdown-{n}")
+            }
+        })
+        .find(|dir| {
+            let uses_dir = |path: &str| path.split('/').next() == Some(dir.as_str());
+            !site.out.values().any(|path| uses_dir(path))
+                && !site.dirs.iter().any(|(d, index)| match index {
+                    DirIndex::Generated => uses_dir(&clean_dir(d)),
+                    DirIndex::Files(path) => uses_dir(path),
+                    DirIndex::Entry(_) => false,
+                })
+        })
+        .unwrap();
+    let source_index = source_documents(site).next().map(|_| {
+        // A source directory can contain a folder named index.html.
+        (0..)
+            .map(|i| {
+                if i == 0 {
+                    "index.html".into()
+                } else {
+                    format!("index-{i}.html")
+                }
+            })
+            .find(|name| {
+                !site
+                    .entries
+                    .keys()
+                    .any(|key| key.split('/').next() == Some(name.as_str()))
+            })
+            .map(|name| format!("{source_dir}/{name}"))
+            .unwrap()
+    });
+    let home = site.dir_out("");
     let index = RefCell::new(search::SearchIndex::default());
     let order = site.reading_order();
     let render = |from_out: &str,
@@ -2953,7 +3022,13 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
             Doc::Entry(k) => Some(k.as_str()),
             Doc::Listing(_) => None,
         };
-        let body = ctx.wrap(&body_fn(&ctx), key, &order, &doc);
+        let mut content = body_fn(&ctx);
+        if home.as_deref() == Some(from_out)
+            && let Some(path) = &source_index
+        {
+            content = source_index_link(&rel_href(from_out, path)) + &content;
+        }
+        let body = ctx.wrap(&content, key, &order, &doc);
         let nav = show_nav(site).then(|| render_nav(&ctx, Some(from_out)));
         let tail = tail_for(from_out, &body);
         let full_title = if title == site.title {
@@ -2986,25 +3061,18 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         Ok(())
     };
 
-    let source_dir = (0..)
-        .map(|n| {
-            if n == 0 {
-                "_markdown".into()
-            } else {
-                format!("_markdown-{n}")
-            }
-        })
-        .find(|dir| {
-            let uses_dir = |path: &str| path.split('/').next() == Some(dir.as_str());
-            !site.out.values().any(|path| uses_dir(path))
-                && !site.dirs.iter().any(|(d, index)| match index {
-                    DirIndex::Generated => uses_dir(&clean_dir(d)),
-                    DirIndex::Files(path) => uses_dir(path),
-                    DirIndex::Entry(_) => false,
-                })
-        })
-        .unwrap();
     let mut sources = 0;
+    if let Some(path) = &source_index {
+        render(
+            path,
+            path,
+            SOURCE_INDEX_TITLE,
+            Doc::Listing("<sources>".into()),
+            "",
+            &|_| render_source_index(site, |key| rel_href(path, &format!("{source_dir}/{key}"))),
+        )?;
+        sources += 1;
+    }
     for (k, e) in &site.entries {
         let out = &site.out[k];
         if e.kind == Kind::Page {
@@ -3018,7 +3086,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
                 if !e.hidden {
                     index.borrow_mut().add_page(&e.title, out, &html, "");
                 }
-                with_markdown_source(&html, &bytes, Some(&source_href))
+                with_markdown_source(&html, &source_href)
             })?;
         } else {
             write(out, &fs::read(site.root.join(k)).map_err(io)?)?;
@@ -3138,10 +3206,19 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
     };
     let index = RefCell::new(search::SearchIndex::default());
     let order = site.reading_order();
+    let home = site.dir_id("");
+    let has_source_index = source_documents(site).next().is_some();
     let section = |id: &str, title: &str, doc: Doc, inner: &str| {
         let key = match &doc {
             Doc::Entry(k) => Some(k.clone()),
             Doc::Listing(_) => None,
+        };
+        let home_link;
+        let inner = if has_source_index && id == home {
+            home_link = source_index_link(&format!("#{SINGLE_SOURCE_INDEX_ID}")) + inner;
+            &home_link
+        } else {
+            inner
         };
         let wrapped = ctx_for(id.to_string()).wrap(inner, key.as_deref(), &order, &doc);
         format!(
@@ -3177,7 +3254,8 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
                         .borrow_mut()
                         .add_page(&e.title, &id, &html, &format!("{id}--"));
                 }
-                with_markdown_source(&html, &bytes, None)
+                assets.borrow_mut().insert(k.clone());
+                with_markdown_source(&html, &single_source_href(k))
             }
             Kind::Text => format!(
                 "<h1>{}</h1>\n<pre class=\"file\">{}</pre>\n",
@@ -3197,6 +3275,14 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         };
         body += &section(&id, &e.title, Doc::Entry(k.clone()), &inner);
         flush(k);
+    }
+    if has_source_index {
+        body += &section(
+            SINGLE_SOURCE_INDEX_ID,
+            SOURCE_INDEX_TITLE,
+            Doc::Listing("<sources>".into()),
+            &render_source_index(site, single_source_href),
+        );
     }
     // PDFs etc. listed in nav are opened as blobs.
     for k in site.nav_keys() {
