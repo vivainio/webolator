@@ -88,6 +88,9 @@ aside.toc a.active { color: var(--link); border-left-color: var(--link); }
 .pager a.next:only-child { margin-left: auto; flex: 0 1 50%; }
 .page-meta + .pager { margin-top: 12px; }
 
+.page-actions { text-align: right; font-size: 13px; margin-bottom: 12px; }
+.page-actions + :is(h1, h2, h3, h4, h5, h6, p) { margin-top: 0; }
+
 .code-wrap { position: relative; }
 .code-wrap button.copy {
   position: absolute; top: 8px; right: 8px; font: 12px/1 inherit; font-family: inherit;

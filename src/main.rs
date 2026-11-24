@@ -1628,7 +1628,9 @@ fn mime_of(key: &str) -> &'static str {
         "webm" => "video/webm",
         "mp3" => "audio/mpeg",
         "wasm" => "application/wasm",
-        e if TEXT_EXT.contains(&e) || e == "md" || e == "markdown" => "text/plain; charset=utf-8",
+        e if TEXT_EXT.contains(&e) || matches!(e, "md" | "markdown" | "mdown") => {
+            "text/plain; charset=utf-8"
+        }
         _ => "application/octet-stream",
     }
 }
@@ -1836,8 +1838,8 @@ fn take_hero<'a>(ctx: &Ctx, key: &str, doc: &'a AstNode<'a>) -> String {
     hero_html(&title, &tagline, &actions)
 }
 
-fn render_markdown(ctx: &Ctx, key: &str) -> String {
-    let md = read_lossy(&ctx.site.root.join(key));
+fn render_markdown(ctx: &Ctx, key: &str, bytes: &[u8]) -> String {
+    let md = String::from_utf8_lossy(bytes);
     let (md, _) = ext::preprocess(&md, &ctx.site.root.join(parent_dir(key)), &ctx.site.root);
     let prefix = match ctx.mode {
         Mode::Static => String::new(),
@@ -1948,6 +1950,19 @@ fn render_markdown(ctx: &Ctx, key: &str) -> String {
             .replace("href=\"#fn", &format!("href=\"#{prefix}fn"));
     }
     html
+}
+
+fn with_markdown_source(html: &str, bytes: &[u8], source_href: Option<&str>) -> String {
+    let source_href = match source_href {
+        Some(href) => esc(href),
+        None => {
+            let source = base64::engine::general_purpose::STANDARD.encode(bytes);
+            format!("data:text/plain;charset=utf-8;base64,{source}")
+        }
+    };
+    format!(
+        "<div class=\"page-actions\"><a class=\"markdown-source\" href=\"{source_href}\" target=\"_blank\" rel=\"noopener\">Markdown source</a></div>\n{html}"
+    )
 }
 
 /// Primary and secondary buttons for a landing page: the first page after this one,
@@ -2971,15 +2986,39 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         Ok(())
     };
 
+    let source_dir = (0..)
+        .map(|n| {
+            if n == 0 {
+                "_markdown".into()
+            } else {
+                format!("_markdown-{n}")
+            }
+        })
+        .find(|dir| {
+            let uses_dir = |path: &str| path.split('/').next() == Some(dir.as_str());
+            !site.out.values().any(|path| uses_dir(path))
+                && !site.dirs.iter().any(|(d, index)| match index {
+                    DirIndex::Generated => uses_dir(&clean_dir(d)),
+                    DirIndex::Files(path) => uses_dir(path),
+                    DirIndex::Entry(_) => false,
+                })
+        })
+        .unwrap();
+    let mut sources = 0;
     for (k, e) in &site.entries {
         let out = &site.out[k];
         if e.kind == Kind::Page {
+            let bytes = fs::read(site.root.join(k)).map_err(|e| format!("{k}: {e}"))?;
+            let source = format!("{source_dir}/{k}");
+            write(&source, &bytes)?;
+            sources += 1;
+            let source_href = rel_href(out, &source);
             render(out, k, &e.title, Doc::Entry(k.clone()), "", &|ctx| {
-                let html = render_markdown(ctx, k);
+                let html = render_markdown(ctx, k, &bytes);
                 if !e.hidden {
                     index.borrow_mut().add_page(&e.title, out, &html, "");
                 }
-                html
+                with_markdown_source(&html, &bytes, Some(&source_href))
             })?;
         } else {
             write(out, &fs::read(site.root.join(k)).map_err(io)?)?;
@@ -3081,7 +3120,7 @@ fn build_static(site: &Site, out_dir: &Path, opts: &BuildOpts) -> Result<usize, 
         .values()
         .filter(|i| !matches!(i, DirIndex::Entry(_)))
         .count();
-    Ok(site.entries.len() + generated + extra)
+    Ok(site.entries.len() + generated + extra + sources)
 }
 
 fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
@@ -3131,13 +3170,14 @@ fn build_single(site: &Site, opts: &BuildOpts) -> Result<String, String> {
         let id = site.entry_id(k);
         let inner = match e.kind {
             Kind::Page => {
-                let html = render_markdown(&ctx_for(id.clone()), k);
+                let bytes = fs::read(site.root.join(k)).map_err(|e| format!("{k}: {e}"))?;
+                let html = render_markdown(&ctx_for(id.clone()), k, &bytes);
                 if !e.hidden {
                     index
                         .borrow_mut()
                         .add_page(&e.title, &id, &html, &format!("{id}--"));
                 }
-                html
+                with_markdown_source(&html, &bytes, None)
             }
             Kind::Text => format!(
                 "<h1>{}</h1>\n<pre class=\"file\">{}</pre>\n",
